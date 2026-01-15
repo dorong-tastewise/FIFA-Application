@@ -2397,13 +2397,38 @@ function addVotingButtonToUI() {
                 
                 // Search Google Drive for "Voting Forms" folders
                 console.log('Searching for Voting Forms folders in Google Drive...');
-                const searchResponse = await fetch(
+                let searchResponse = await fetch(
                     `https://www.googleapis.com/drive/v3/files?q=name contains 'Voting Forms' and mimeType='application/vnd.google-apps.folder' and trashed=false&orderBy=createdTime desc&pageSize=10&fields=files(id,name,createdTime)`,
                     { headers: { 'Authorization': `Bearer ${token}` } }
                 );
                 
+                // If auth failed, try to re-authenticate
+                if (!searchResponse.ok && (searchResponse.status === 401 || searchResponse.status === 403)) {
+                    console.log('Token expired, re-authenticating...');
+                    _votingAccessToken = null;
+                    sessionStorage.removeItem('votingAccessToken');
+                    
+                    const clientId = document.getElementById('googleDriveClientId')?.value?.trim() ||
+                                   document.getElementById('googleDriveClientIdForExport')?.value?.trim() ||
+                                   localStorage.getItem('googleDriveClientId');
+                    
+                    if (clientId && typeof window.signInWithGoogle === 'function') {
+                        token = await window.signInWithGoogle('select_account');
+                        _votingAccessToken = token;
+                        sessionStorage.setItem('votingAccessToken', token);
+                        
+                        // Retry the search
+                        searchResponse = await fetch(
+                            `https://www.googleapis.com/drive/v3/files?q=name contains 'Voting Forms' and mimeType='application/vnd.google-apps.folder' and trashed=false&orderBy=createdTime desc&pageSize=10&fields=files(id,name,createdTime)`,
+                            { headers: { 'Authorization': `Bearer ${token}` } }
+                        );
+                    }
+                }
+                
                 if (!searchResponse.ok) {
-                    throw new Error('Failed to search Drive');
+                    const errText = await searchResponse.text();
+                    console.error('Drive search failed:', searchResponse.status, errText);
+                    throw new Error('Failed to search Drive - please try again');
                 }
                 
                 const searchData = await searchResponse.json();
@@ -2967,13 +2992,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Search Google Drive for "Voting Forms" folders
                 console.log('Searching for Voting Forms folders in Google Drive...');
-                const searchResponse = await fetch(
+                let searchResponse = await fetch(
                     `https://www.googleapis.com/drive/v3/files?q=name contains 'Voting Forms' and mimeType='application/vnd.google-apps.folder' and trashed=false&orderBy=createdTime desc&pageSize=10&fields=files(id,name,createdTime)`,
                     { headers: { 'Authorization': `Bearer ${token}` } }
                 );
                 
+                // If auth failed, try to re-authenticate
+                if (!searchResponse.ok && (searchResponse.status === 401 || searchResponse.status === 403)) {
+                    console.log('Token expired, re-authenticating...');
+                    _votingAccessToken = null;
+                    sessionStorage.removeItem('votingAccessToken');
+                    
+                    const clientId = document.getElementById('googleDriveClientId')?.value?.trim() ||
+                                   document.getElementById('googleDriveClientIdForExport')?.value?.trim() ||
+                                   localStorage.getItem('googleDriveClientId');
+                    
+                    if (clientId && typeof window.signInWithGoogle === 'function') {
+                        token = await window.signInWithGoogle('select_account');
+                        _votingAccessToken = token;
+                        sessionStorage.setItem('votingAccessToken', token);
+                        
+                        // Retry the search
+                        searchResponse = await fetch(
+                            `https://www.googleapis.com/drive/v3/files?q=name contains 'Voting Forms' and mimeType='application/vnd.google-apps.folder' and trashed=false&orderBy=createdTime desc&pageSize=10&fields=files(id,name,createdTime)`,
+                            { headers: { 'Authorization': `Bearer ${token}` } }
+                        );
+                    }
+                }
+                
                 if (!searchResponse.ok) {
-                    throw new Error('Failed to search Drive');
+                    const errText = await searchResponse.text();
+                    console.error('Drive search failed:', searchResponse.status, errText);
+                    throw new Error('Failed to search Drive - please try again');
                 }
                 
                 const searchData = await searchResponse.json();
