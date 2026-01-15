@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Voting Forms Creation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Voting Forms Creation</h1>
+    <p>This will create a timestamped folder with 5 empty forms named "1", "2", "3", "4", "5"</p>
+    <p><strong>Using auth and spreadsheet from main app automatically</strong></p>
+    
+    <button onclick="testCreateForms()">Create Test Forms</button>
+    
+    <div id="status"></div>
+
+    <script src="config.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+        // Use separate variable name to avoid conflicts
+        let testAccessToken = null;
+
+        async function initGoogleAuth(clientId) {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.accounts) {
+                    resolve();
+                } else {
+                    const script = document.createElement('script');
+                    script.src = 'https://accounts.google.com/gsi/client';
+                    script.async = true;
+                    script.defer = true;
+                    script.onload = () => {
+                        setTimeout(() => {
+                            if (window.google && window.google.accounts) {
+                                resolve();
+                            } else {
+                                reject(new Error('Google Identity Services failed to initialize'));
+                            }
+                        }, 500);
+                    };
+                    script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+                    document.head.appendChild(script);
+                }
+            });
+        }
+
+        async function signIn(clientId) {
+            return new Promise((resolve, reject) => {
+                const tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/forms.body',
+                    callback: (response) => {
+                        if (response.error) {
+                            reject(new Error(response.error));
+                    } else {
+                        testAccessToken = response.access_token;
+                        resolve(testAccessToken);
+                    }
+                },
+            });
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+            });
+        }
+
+        async function getSpreadsheetParentFolder(spreadsheetId) {
+            const response = await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?fields=parents`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${testAccessToken}`
+                }
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Failed to get spreadsheet metadata: ${errorData.error?.message || response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.parents && data.parents.length > 0 ? data.parents[0] : null;
+        }
+
+        async function createFolder(folderName, parentFolderId) {
+            const folderMetadata = {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder'
+            };
+
+            if (parentFolderId) {
+                folderMetadata.parents = [parentFolderId];
+            }
+
+            const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${testAccessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(folderMetadata)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Failed to create folder: ${errorData.error?.message || response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.id;
+        }
+
+        async function createForm(formName, folderId) {
+            // Create form
+            const createResponse = await fetch('https://forms.googleapis.com/v1/forms', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${testAccessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    info: {
+                        title: formName
+                    }
+                })
+            });
+
+            if (!createResponse.ok) {
+                const errorData = await createResponse.json();
+                throw new Error(`Failed to create form: ${errorData.error?.message || createResponse.statusText}`);
+            }
+
+            const formData = await createResponse.json();
+            const formId = formData.formId;
+
+            // RENAME the form file in Drive (Forms API doesn't set filename correctly)
+            const renameResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${formId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${testAccessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: formName
+                })
+            });
+            
+            if (!renameResponse.ok) {
+                console.warn(`Failed to rename form to "${formName}"`);
+            }
+
+            // Move form to folder
+            if (folderId) {
+                const getResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${formId}?fields=parents`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${testAccessToken}`
+                    }
+                });
+
+                if (getResponse.ok) {
+                    const fileData = await getResponse.json();
+                    const currentParents = fileData.parents || [];
+
+                    if (currentParents.length > 0) {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${formId}?removeParents=${currentParents.join(',')}&addParents=${folderId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Authorization': `Bearer ${testAccessToken}`
+                            }
+                        });
+                    } else {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${formId}?addParents=${folderId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Authorization': `Bearer ${testAccessToken}`
+                            }
+                        });
+                    }
+                }
+            }
+
+            return {
+                formId: formId,
+                url: `https://docs.google.com/forms/d/${formId}/viewform`,
+                editUrl: `https://docs.google.com/forms/d/${formId}/edit`
+            };
+        }
+
+        function extractSpreadsheetId(url) {
+            if (!url) return null;
+            const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+            return match ? match[1] : null;
+        }
+
+        async function testCreateForms() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = '';
+            statusDiv.textContent = 'Starting test...\n';
+
+            try {
+                // Get client ID from main app
+                let clientId = '';
+                if (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.googleDrive?.clientId) {
+                    clientId = APP_CONFIG.googleDrive.clientId;
+                } else {
+                    // Try localStorage
+                    clientId = localStorage.getItem('googleDriveClientId') || '';
+                }
+                
+                if (!clientId) {
+                    throw new Error('No OAuth Client ID found. Please set it up in the main app first.');
+                }
+                statusDiv.textContent += `Using Client ID: ${clientId.substring(0, 20)}...\n`;
+
+                // Get spreadsheet URL from main app
+                let spreadsheetUrl = '';
+                if (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.googleSheets?.lastSheetUrl) {
+                    spreadsheetUrl = APP_CONFIG.googleSheets.lastSheetUrl;
+                } else {
+                    spreadsheetUrl = localStorage.getItem('lastGoogleSheetUrl') || '';
+                }
+                
+                if (spreadsheetUrl) {
+                    statusDiv.textContent += `Using Spreadsheet: ${spreadsheetUrl}\n`;
+                } else {
+                    statusDiv.textContent += 'No spreadsheet URL found, will use root folder\n';
+                }
+
+                // Step 1: Check for existing token or authenticate
+                statusDiv.textContent += 'Step 1: Checking authentication...\n';
+                
+                // Check if we already have a token in memory (from previous run without page refresh)
+                if (testAccessToken) {
+                    statusDiv.textContent += '✓ Using in-memory token (no dialog)\n';
+                } else {
+                    // Try to get stored token from sessionStorage
+                    const storedToken = sessionStorage.getItem('testAccessToken');
+                    
+                    if (storedToken) {
+                        statusDiv.textContent += 'Found stored token, verifying...\n';
+                        // Verify token is still valid
+                        const verifyResponse = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+                            headers: { 'Authorization': `Bearer ${storedToken}` }
+                        });
+                        
+                        if (verifyResponse.ok) {
+                            testAccessToken = storedToken;
+                            statusDiv.textContent += '✓ Token valid - no dialog needed!\n';
+                        } else {
+                            statusDiv.textContent += 'Token expired, need new one...\n';
+                            sessionStorage.removeItem('testAccessToken');
+                        }
+                    }
+                    
+                    // If still no valid token, authenticate (this will show dialog)
+                    if (!testAccessToken) {
+                        statusDiv.textContent += 'Need to authenticate (dialog will appear ONCE)...\n';
+                        await initGoogleAuth(clientId);
+                        
+                        testAccessToken = await new Promise((resolve, reject) => {
+                            const tokenClient = google.accounts.oauth2.initTokenClient({
+                                client_id: clientId,
+                                scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/forms.body',
+                                callback: (response) => {
+                                    if (response.error) {
+                                        reject(new Error(response.error));
+                                    } else {
+                                        resolve(response.access_token);
+                                    }
+                                },
+                            });
+                            tokenClient.requestAccessToken({ prompt: 'select_account' });
+                        });
+                        
+                        // Store token for next time
+                        sessionStorage.setItem('testAccessToken', testAccessToken);
+                        statusDiv.textContent += '✓ Authenticated and token saved for future use\n';
+                    }
+                }
+
+                // Step 2: Get parent folder
+                let parentFolderId = null;
+                if (spreadsheetUrl) {
+                    statusDiv.textContent += 'Step 2: Getting parent folder from spreadsheet...\n';
+                    const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+                    if (spreadsheetId) {
+                        parentFolderId = await getSpreadsheetParentFolder(spreadsheetId);
+                        statusDiv.textContent += `✓ Parent folder: ${parentFolderId || 'root'}\n`;
+                    } else {
+                        statusDiv.textContent += '⚠ Could not extract spreadsheet ID, using root\n';
+                    }
+                } else {
+                    statusDiv.textContent += 'Step 2: No spreadsheet URL provided, using root folder\n';
+                }
+
+                // Step 3: Create folder
+                statusDiv.textContent += 'Step 3: Creating timestamped folder...\n';
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] + '_' + 
+                                 new Date().toTimeString().split(' ')[0].replace(/:/g, '-').split('.')[0];
+                const folderName = `Test Voting Forms ${timestamp}`;
+                const folderId = await createFolder(folderName, parentFolderId);
+                statusDiv.textContent += `✓ Created folder: ${folderName}\n`;
+                statusDiv.textContent += `  Folder ID: ${folderId}\n`;
+                statusDiv.textContent += `  Folder URL: https://drive.google.com/drive/folders/${folderId}\n`;
+
+                // Step 4: Create 5 forms
+                statusDiv.textContent += 'Step 4: Creating 5 forms...\n';
+                const forms = [];
+                for (let i = 1; i <= 5; i++) {
+                    statusDiv.textContent += `  Creating form "${i}"...\n`;
+                    const form = await createForm(i.toString(), folderId);
+                    forms.push(form);
+                    statusDiv.textContent += `    ✓ Created: ${form.url}\n`;
+                    // Small delay to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+
+                // Success!
+                statusDiv.className = 'success';
+                statusDiv.textContent += '\n✅ SUCCESS!\n\n';
+                statusDiv.textContent += `Folder: https://drive.google.com/drive/folders/${folderId}\n\n`;
+                statusDiv.textContent += 'Forms created:\n';
+                forms.forEach((form, index) => {
+                    statusDiv.textContent += `  ${index + 1}: ${form.url}\n`;
+                });
+
+            } catch (error) {
+                statusDiv.className = 'error';
+                statusDiv.textContent += `\n❌ ERROR: ${error.message}\n`;
+                console.error('Full error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

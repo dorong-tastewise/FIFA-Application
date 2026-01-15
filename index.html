@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Draw Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- SETUP SCREEN -->
+    <div class="screen" id="setupScreen">
+        <div class="setup-container">
+            <header class="setup-header">
+                <h1>DRAW SIMULATOR</h1>
+                <h2>CONFIGURATION</h2>
+            </header>
+
+            <!-- Quick Resume Voting -->
+            <div style="background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%); padding: 15px 20px; border-radius: 10px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="color: white;">
+                    <strong style="font-size: 1.1em;">Resume Previous Voting Session?</strong>
+                    <div style="font-size: 0.85em; opacity: 0.9; margin-top: 3px;">Skip setup and go directly to your last voting forms</div>
+                </div>
+                <button id="resumeVotingMainBtn" style="background: white; color: #357abd; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; font-family: 'Russo One', sans-serif; white-space: nowrap;">
+                    📂 RESUME LAST FORMS
+                </button>
+            </div>
+
+            <!-- Step 1: Basic Setup -->
+            <div class="setup-section" id="step1">
+                <h3>Step 1: Basic Setup</h3>
+
+                <div class="setup-row">
+                    <div class="setup-field">
+                        <label for="eventTitle">Event Title</label>
+                        <input type="text" id="eventTitle" placeholder="e.g., FIFA World Cup 2026" value="FIFA World Cup">
+                    </div>
+                </div>
+
+                <div class="setup-row">
+                    <div class="setup-field">
+                        <label for="numGroups">Number of Groups</label>
+                        <input type="number" id="numGroups" min="1" max="16" value="8">
+                    </div>
+                    <div class="setup-field">
+                        <label for="numPots">Number of Pots</label>
+                        <input type="number" id="numPots" min="1" max="8" value="4">
+                    </div>
+                </div>
+
+                <div class="setup-row">
+                    <div class="setup-field">
+                        <label for="animationDuration">Animation Duration (seconds)</label>
+                        <input type="number" id="animationDuration" min="0.1" max="10" step="0.1" value="0.8">
+                        <div class="setup-hint" style="margin-top: 5px; font-size: 0.85rem; color: #aaa;">
+                            Time between each draw in animated mode (0.1 - 10 seconds)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-divider">
+                    <span>Google Integration (Optional)</span>
+                </div>
+
+                <div class="setup-hint">
+                    <strong>Choose your data source:</strong>
+                    <ul style="margin: 10px 0; padding-left: 20px; text-align: left;">
+                        <li><strong>Google Sheets API:</strong> Simple API key method (files must be publicly shared)</li>
+                        <li><strong>Google Drive API:</strong> OAuth method (works with private files, supports CSV/JSON/TXT)</li>
+                    </ul>
+                </div>
+
+                <!-- Google Drive OAuth Option -->
+                <div class="setup-row">
+                    <div class="setup-field">
+                        <label>
+                            <input type="radio" name="dataSource" value="drive" id="useDriveAPI">
+                            Use Google Drive API (OAuth - Recommended)
+                        </label>
+                    </div>
+                </div>
+
+                <div id="driveApiSection" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+                    <div class="setup-hint">
+                        <strong>How to use Google Drive:</strong>
+                        <ol style="margin: 10px 0; padding-left: 20px; text-align: left;">
+                            <li>Get your OAuth Client ID from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></li>
+                            <li>Enable Google Drive API in your project</li>
+                            <li>Paste your Client ID below and click "Connect to Google"</li>
+                            <li>Sign in and grant permissions</li>
+                            <li>Paste your Google Drive file URL (supports Sheets, CSV, JSON, TXT)</li>
+                        </ol>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <label for="googleDriveClientId">Google OAuth Client ID</label>
+                            <input type="text" id="googleDriveClientId" placeholder="123456789-abc.apps.googleusercontent.com">
+                        </div>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <button type="button" id="connectGoogleDriveBtn" class="setup-btn secondary" style="width: 100%;">
+                                Connect to Google Drive
+                            </button>
+                            <div id="googleDriveStatus" style="margin-top: 10px; font-size: 0.9rem; color: #aaa;"></div>
+                        </div>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <label for="googleDriveFileUrl">Google Drive File URL</label>
+                            <input type="text" id="googleDriveFileUrl" placeholder="https://drive.google.com/file/d/... or https://docs.google.com/spreadsheets/d/...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google Sheets API Key Option -->
+                <div class="setup-row">
+                    <div class="setup-field">
+                        <label>
+                            <input type="radio" name="dataSource" value="sheets" id="useSheetsAPI" checked>
+                            Use Google Sheets API (API Key) - For Loading Data
+                        </label>
+                        <div class="setup-hint" style="margin-top: 5px; font-size: 0.85rem; color: #aaa;">
+                            Note: Export to Google Sheets requires OAuth (see field below)
+                        </div>
+                    </div>
+                </div>
+
+                <div id="sheetsApiSection" style="margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+                    <div class="setup-hint">
+                        <strong>How to use Google Sheets:</strong>
+                        <ol style="margin: 10px 0; padding-left: 20px; text-align: left;">
+                            <li>Create a Google Sheet with pot names in the first row</li>
+                            <li>Add team/entry names in columns below each pot name</li>
+                            <li>Share the sheet: File → Share → Get link → "Anyone with the link can view"</li>
+                            <li>Get an API key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a> and enable Google Sheets API</li>
+                            <li>Paste the Sheet URL and API key below</li>
+                        </ol>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <label for="googleSheetUrl">Google Sheets URL</label>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="googleSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="flex: 1;">
+                                <button type="button" id="detectStructureBtn" class="setup-btn secondary" style="padding: 10px 20px; white-space: nowrap;">Detect Structure</button>
+                            </div>
+                            <div id="urlSaveStatus" style="margin-top: 5px; font-size: 0.85rem; color: #4CAF50;"></div>
+                        </div>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <label for="googleApiKey">Google API Key</label>
+                            <input type="text" id="googleApiKey" placeholder="Your Google Sheets API key">
+                        </div>
+                    </div>
+
+                    <div class="setup-row" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <div class="setup-field">
+                            <label for="googleDriveClientIdForExport">Google OAuth Client ID (Required for Export)</label>
+                            <input type="text" id="googleDriveClientIdForExport" placeholder="123456789-abc.apps.googleusercontent.com">
+                            <div class="setup-hint" style="margin-top: 5px; font-size: 0.85rem;">
+                                Needed to export results to Google Sheets. Get it from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="setup-row">
+                        <div class="setup-field">
+                            <label for="sheetName">Sheet Name (optional)</label>
+                            <input type="text" id="sheetName" placeholder="Participants" value="Participants">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                    <button class="setup-btn primary" id="continueToStep2">Continue to Group Setup</button>
+                    <button class="setup-btn instant-draw-button" id="instantDrawBtnSetup" style="background: #E74C3C; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 700; cursor: pointer; font-family: 'Russo One', sans-serif; text-transform: uppercase; letter-spacing: 1px;">INSTANT DRAW</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Group Names -->
+            <div class="setup-section hidden" id="step2">
+                <h3>Step 2: Name Your Groups</h3>
+                <p class="setup-hint">Give each group a name (e.g., A, B, C or North, South, East, West)</p>
+
+                <div class="groups-config" id="groupsConfig">
+                    <!-- Dynamically generated -->
+                </div>
+
+                <div class="setup-nav">
+                    <button class="setup-btn secondary" id="backToStep1">Back</button>
+                    <button class="setup-btn primary" id="continueToStep3">Continue to Pot Setup</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Pot Configuration -->
+            <div class="setup-section hidden" id="step3">
+                <h3>Step 3: Configure Pots & Entries</h3>
+                <p class="setup-hint">Add entries to each pot. Each group will receive one entry from each pot.</p>
+
+                <div class="pots-config" id="potsConfig">
+                    <!-- Dynamically generated -->
+                </div>
+
+                <div class="setup-nav">
+                    <button class="setup-btn secondary" id="backToStep2">Back</button>
+                    <button class="setup-btn primary" id="startDraw">Start Draw</button>
+                </div>
+            </div>
+
+            <!-- Validation Message -->
+            <div class="validation-message hidden" id="validationMessage">
+                <span id="validationText"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- DRAW SCREEN -->
+    <div class="screen hidden" id="drawScreen">
+        <div class="container">
+            <header>
+                <h1 id="drawTitle">CUSTOM DRAW</h1>
+                <h2>OFFICIAL DRAW</h2>
+            </header>
+
+            <div class="main-content">
+                <!-- Pots Section -->
+                <div class="pots-section">
+                    <h3>POTS</h3>
+                    <div class="pots-container" id="potsContainer">
+                        <!-- Dynamically generated -->
+                    </div>
+                </div>
+
+                <!-- Groups Section -->
+                <div class="groups-section">
+                    <h3>GROUPS</h3>
+                    <div class="groups-container" id="groupsContainer">
+                        <!-- Dynamically generated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Draw Animation Overlay -->
+            <div class="draw-overlay" id="drawOverlay">
+                <div class="draw-ball" id="drawBall">
+                    <span class="ball-text"></span>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button id="drawBtn" class="draw-button">DRAW NEXT</button>
+                <button id="autoDrawBtn" class="auto-draw-button">AUTO DRAW ALL</button>
+                <button id="instantDrawBtn" class="instant-draw-button">INSTANT DRAW</button>
+                <button id="exportBtn" class="export-button">EXPORT TO SHEET</button>
+                <button id="generateVotingFormsBtn" class="export-button">GENERATE VOTING FORMS</button>
+                <button id="resetBtn" class="reset-button">RESET</button>
+                <button id="reconfigureBtn" class="reconfig-button">RECONFIGURE</button>
+            </div>
+
+            <!-- Current Draw Info -->
+            <div class="current-draw-info" id="currentDrawInfo">
+                <span id="drawStatus">Click "DRAW NEXT" to begin</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+    <script src="voting-solution.js"></script>
+</body>
+</html>

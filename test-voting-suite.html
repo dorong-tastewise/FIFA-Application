@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voting Test Suite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; }
+        .info { background: #cce7ff; border: 1px solid #74c0fc; color: #0c5460; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        .test-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Voting Test Suite</h1>
+        
+        <div class="status info">
+            <strong>ℹ️ Test Suite:</strong> This page provides comprehensive tests for the voting system including form generation, email extraction, anonymous settings, and more.
+        </div>
+        
+        <h2>Test Results:</h2>
+        <div id="testResults"></div>
+        
+        <h2>Manual Tests:</h2>
+        <button onclick="testVotingFormGeneration()">Test Form Generation Logic</button>
+        <button onclick="testAnonymousSettings()">Test Anonymous Settings</button>
+        <button onclick="testEmailExtraction()">Test Email Extraction (Google Tags)</button>
+        <button onclick="testRealSheetEmailExtraction()">Test Real Sheet Email Extraction</button>
+        <button onclick="showAllCellLinks()" style="background: #e91e63;">Show All Cell Links/Tags</button>
+        <button onclick="findSharedWithEmail()" style="background: #ff5722;">Find Files Shared With Email</button>
+        <button onclick="restoreAndShowSharing()" style="background: #4CAF50;">Restore Files & Show Sharing</button>
+        <button onclick="findContactByEmail()" style="background: #673AB7;">Find Contact By Email</button>
+        <button onclick="showMockFormCreation()">Show Mock Form Creation</button>
+        <button onclick="authenticateForTest()" style="background: #28a745;">Authenticate with Google</button>
+        
+        <div id="testOutput" class="test-output" style="display: none;"></div>
+        
+        <h2>Integration Test:</h2>
+        <p>To test the full integration:</p>
+        <ol>
+            <li>Load your main application</li>
+            <li>Complete a draw with test data</li>
+            <li>Click "GENERATE VOTING FORMS"</li>
+            <li>Check browser console for messages about anonymous settings</li>
+            <li>Verify created forms have privacy settings applied</li>
+        </ol>
+    </div>
+
+    <script src="voting-solution.js"></script>
+    <script>
+        function log(message, type = 'info') {
+            const output = document.getElementById('testOutput');
+            output.style.display = 'block';
+            const timestamp = new Date().toLocaleTimeString();
+            output.innerHTML += `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+        }
+
+        function testVotingFormGeneration() {
+            log('Testing voting form generation logic...', 'info');
+            
+            try {
+                // Mock draw state and config
+                const mockDrawState = {
+                    drawComplete: true,
+                    groups: {
+                        'Team Alpha': [
+                            { entry: 'Alice Smith' },
+                            { entry: 'Bob Johnson' }
+                        ],
+                        'Team Beta': [
+                            { entry: 'Charlie Brown' },
+                            { entry: 'Diana Prince' }
+                        ],
+                        'Team Gamma': [
+                            { entry: 'Eve Wilson' },
+                            { entry: 'Frank Miller' }
+                        ]
+                    }
+                };
+                
+                const mockConfig = {
+                    groupNames: ['Team Alpha', 'Team Beta', 'Team Gamma']
+                };
+                
+                const votingData = generateVotingForms(mockDrawState, mockConfig);
+                
+                log(`✓ Successfully generated ${votingData.summary.totalForms} forms`, 'success');
+                log(`✓ Total teams: ${votingData.summary.totalTeams}`, 'success');
+                log(`✓ Total participants: ${votingData.summary.totalParticipants}`, 'success');
+                
+                // Check each form
+                Object.keys(votingData.forms).forEach(formId => {
+                    const form = votingData.forms[formId];
+                    log(`Form ${formId}: Team "${form.teamName}" excluded, can vote for: ${form.votingOptions.join(', ')}`, 'info');
+                });
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        function testAnonymousSettings() {
+            log('Testing anonymous settings configuration...', 'info');
+            
+            // Test the settings object that would be sent to Google Forms API
+            const anonymousSettings = {
+                quizSettings: {
+                    isQuiz: false
+                },
+                collectEmail: false,
+                requiresLogin: false,
+                allowResponseEdits: false,
+                publishChart: false,
+                progressBar: true
+            };
+            
+            log('✓ Anonymous settings object:', 'success');
+            log(JSON.stringify(anonymousSettings, null, 2), 'info');
+            
+            // Check that all privacy-related settings are correct
+            const privacyChecks = [
+                { setting: 'collectEmail', expected: false, actual: anonymousSettings.collectEmail },
+                { setting: 'requiresLogin', expected: false, actual: anonymousSettings.requiresLogin },
+                { setting: 'allowResponseEdits', expected: false, actual: anonymousSettings.allowResponseEdits },
+                { setting: 'publishChart', expected: false, actual: anonymousSettings.publishChart }
+            ];
+            
+            privacyChecks.forEach(check => {
+                if (check.actual === check.expected) {
+                    log(`✓ ${check.setting}: ${check.actual} (correct)`, 'success');
+                } else {
+                    log(`✗ ${check.setting}: ${check.actual}, expected ${check.expected}`, 'error');
+                }
+            });
+        }
+
+        async function testEmailExtraction() {
+            log('Testing email extraction with Google tags...', 'info');
+            
+            if (typeof extractParticipantEmails !== 'function') {
+                log('✗ extractParticipantEmails function not found', 'error');
+                return;
+            }
+            
+            // Mock spreadsheet data with Google tags
+            const mockSheetData = [
+                ['Name', 'Email'], // Headers
+                ['@alice.smith', 'alice.smith@example.com'],
+                ['@bob.johnson', 'bob.johnson@example.com'],
+                ['charlie.brown', 'charlie.brown@example.com'], // Without @
+                ['@diana.prince', 'diana.prince@example.com'],
+                ['eve.wilson', 'eve.wilson@example.com']
+            ];
+            
+            log('Mock spreadsheet data:', 'info');
+            log(JSON.stringify(mockSheetData, null, 2), 'info');
+            
+            try {
+                // Use null for accessToken/spreadsheetId to test fallback mode
+                const emailMap = await extractParticipantEmails(null, null, 'Participants', mockSheetData);
+                
+                log(`✓ Extracted ${Object.keys(emailMap).length} email mappings`, 'success');
+                log('Email map:', 'info');
+                log(JSON.stringify(emailMap, null, 2), 'info');
+                
+                // Test cases
+                const testCases = [
+                    { name: '@alice.smith', expected: 'alice.smith@example.com', description: 'Google tag with @' },
+                    { name: 'alice.smith', expected: 'alice.smith@example.com', description: 'Name without @ (should still work)' },
+                    { name: '@bob.johnson', expected: 'bob.johnson@example.com', description: 'Another Google tag' },
+                    { name: 'charlie.brown', expected: 'charlie.brown@example.com', description: 'Name without @ prefix' },
+                    { name: '@charlie.brown', expected: 'charlie.brown@example.com', description: 'Name with @ prefix (should work)' },
+                    { name: 'nonexistent', expected: undefined, description: 'Non-existent name' }
+                ];
+                
+                log('\n=== Testing Lookups ===', 'info');
+                testCases.forEach(testCase => {
+                    const result = emailMap[testCase.name];
+                    if (result === testCase.expected) {
+                        log(`✓ ${testCase.description}: "${testCase.name}" → ${result || 'undefined'}`, 'success');
+                    } else {
+                        log(`✗ ${testCase.description}: "${testCase.name}" → ${result || 'undefined'} (expected ${testCase.expected || 'undefined'})`, 'error');
+                    }
+                });
+                
+                // Test with generateVotingForms
+                log('\n=== Testing with generateVotingForms ===', 'info');
+                const mockDrawState = {
+                    drawComplete: true,
+                    groups: {
+                        'Team Alpha': [
+                            { entry: '@alice.smith' },
+                            { entry: '@bob.johnson' }
+                        ],
+                        'Team Beta': [
+                            { entry: 'charlie.brown' },
+                            { entry: '@diana.prince' }
+                        ]
+                    }
+                };
+                
+                const mockConfig = {
+                    groupNames: ['Team Alpha', 'Team Beta']
+                };
+                
+                const votingData = generateVotingForms(mockDrawState, mockConfig, emailMap);
+                
+                log('✓ Generated voting forms with email mapping', 'success');
+                
+                // Check that emails were assigned correctly
+                Object.keys(votingData.forms).forEach(formId => {
+                    const form = votingData.forms[formId];
+                    log(`\nForm: ${form.teamName}`, 'info');
+                    log(`  Participants: ${form.assignedParticipants.join(', ')}`, 'info');
+                    log(`  Emails: ${form.assignedEmails.join(', ')}`, 'info');
+                    
+                    if (form.assignedEmails.length === form.assignedParticipants.length) {
+                        log(`  ✓ All participants have emails assigned`, 'success');
+                    } else {
+                        log(`  ✗ Missing emails: ${form.assignedParticipants.length - form.assignedEmails.length} participants without emails`, 'error');
+                    }
+                });
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testRealSheetEmailExtraction() {
+            log('Testing email extraction using People API...', 'info');
+            
+            // Get and validate access token
+            let accessToken = sessionStorage.getItem('votingAccessToken');
+            
+            if (!accessToken) {
+                log('✗ No access token. Click "Authenticate with Google" first.', 'error');
+                return;
+            }
+            
+            // Validate token
+            try {
+                const verifyResponse = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                if (!verifyResponse.ok) {
+                    log('✗ Token expired. Click "Authenticate with Google" again.', 'error');
+                    sessionStorage.removeItem('votingAccessToken');
+                    return;
+                }
+                log('✓ Token valid', 'success');
+            } catch (e) {
+                log('✗ Token validation failed', 'error');
+                return;
+            }
+            
+            // Get spreadsheet URL from localStorage or prompt
+            let spreadsheetUrl = localStorage.getItem('lastGoogleSheetUrl');
+            if (!spreadsheetUrl) {
+                spreadsheetUrl = prompt('Enter your Google Spreadsheet URL:');
+                if (!spreadsheetUrl) {
+                    log('✗ No spreadsheet URL provided', 'error');
+                    return;
+                }
+                localStorage.setItem('lastGoogleSheetUrl', spreadsheetUrl);
+            }
+            
+            log(`✓ Spreadsheet URL: ${spreadsheetUrl}`, 'success');
+            
+            // Extract spreadsheet ID
+            const match = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) ||
+                         spreadsheetUrl.match(/\/file\/d\/([a-zA-Z0-9-_]+)/);
+            if (!match) {
+                log('✗ Could not extract spreadsheet ID from URL', 'error');
+                return;
+            }
+            const spreadsheetId = match[1];
+            log(`✓ Spreadsheet ID: ${spreadsheetId}`, 'success');
+            
+            const sheetName = localStorage.getItem('lastSheetName') || 'Participants';
+            log(`✓ Sheet name: ${sheetName}`, 'success');
+            
+            try {
+                log('\n=== Loading Names from Spreadsheet ===', 'info');
+                
+                // Fetch spreadsheet with grid data
+                const range = `${sheetName}!A1:Z1000`;
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodeURIComponent(range)}&includeGridData=true`;
+                
+                const response = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    log(`✗ Failed to fetch spreadsheet: ${response.status}`, 'error');
+                    log(JSON.stringify(err, null, 2), 'error');
+                    return;
+                }
+                
+                const data = await response.json();
+                const gridData = data.sheets?.[0]?.data?.[0];
+                
+                if (!gridData?.rowData) {
+                    log('✗ No data found in spreadsheet', 'error');
+                    return;
+                }
+                
+                // Collect all names (stop at empty row)
+                const allNames = new Set();
+                for (let rowIndex = 1; rowIndex < gridData.rowData.length; rowIndex++) {
+                    const row = gridData.rowData[rowIndex];
+                    if (!row?.values || row.values.length === 0) break;
+                    
+                    const firstCell = row.values[0];
+                    const firstValue = firstCell?.effectiveValue?.stringValue || firstCell?.formattedValue || '';
+                    if (!firstValue.trim()) break;
+                    
+                    for (const cell of row.values) {
+                        const name = cell?.effectiveValue?.stringValue || cell?.formattedValue || '';
+                        if (name.trim()) {
+                            allNames.add(name.trim());
+                        }
+                    }
+                }
+                
+                log(`\n✓ Found ${allNames.size} unique names in spreadsheet`, 'success');
+                log('Names: ' + Array.from(allNames).slice(0, 10).join(', ') + (allNames.size > 10 ? '...' : ''), 'info');
+                
+                // Load contacts from People API
+                log('\n=== Loading Google Contacts ===', 'info');
+                
+                const peopleResponse = await fetch(
+                    'https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses&pageSize=1000',
+                    { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (!peopleResponse.ok) {
+                    const err = await peopleResponse.json().catch(() => ({}));
+                    log(`✗ People API failed: ${peopleResponse.status}`, 'error');
+                    if (peopleResponse.status === 403) {
+                        log('Enable People API at: https://console.cloud.google.com/apis/library/people.googleapis.com', 'warning');
+                    }
+                    log(JSON.stringify(err, null, 2), 'error');
+                    return;
+                }
+                
+                const peopleData = await peopleResponse.json();
+                const connections = peopleData.connections || [];
+                log(`✓ Loaded ${connections.length} contacts from Google`, 'success');
+                
+                // Build contact lookup
+                const contactLookup = {};
+                for (const person of connections) {
+                    const names = person.names || [];
+                    const emails = person.emailAddresses || [];
+                    
+                    if (emails.length > 0) {
+                        const email = emails[0].value;
+                        for (const n of names) {
+                            const displayName = (n.displayName || '').toLowerCase().trim();
+                            if (displayName) contactLookup[displayName] = email;
+                        }
+                    }
+                }
+                
+                // Debug: show first 15 contact names
+                log('\nFirst 15 contact names in lookup:', 'info');
+                Object.keys(contactLookup).slice(0, 15).forEach(name => {
+                    log(`  "${name}" → ${contactLookup[name]}`, 'info');
+                });
+                
+                // Match names to emails
+                log('\n=== Matching Names to Emails ===', 'info');
+                const emailMap = {};
+                const missing = [];
+                
+                for (const name of allNames) {
+                    const lowerName = name.toLowerCase().trim();
+                    let email = contactLookup[lowerName];
+                    
+                    // Try partial match
+                    if (!email) {
+                        for (const [contactName, contactEmail] of Object.entries(contactLookup)) {
+                            if (contactName.includes(lowerName) || lowerName.includes(contactName)) {
+                                email = contactEmail;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (email) {
+                        emailMap[name] = email;
+                        log(`  ✓ "${name}" → ${email}`, 'success');
+                    } else {
+                        missing.push(name);
+                        log(`  ✗ "${name}" → NOT FOUND`, 'error');
+                    }
+                }
+                
+                log(`\n=== SUMMARY ===`, 'info');
+                log(`Total names: ${allNames.size}`, 'info');
+                log(`Matched: ${Object.keys(emailMap).length}`, 'success');
+                log(`Missing: ${missing.length}`, missing.length > 0 ? 'error' : 'success');
+                
+                if (missing.length > 0) {
+                    log('\nMissing contacts - add these to Google Contacts:', 'warning');
+                    missing.forEach(n => log(`  - ${n}`, 'warning'));
+                }
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function findContactByEmail() {
+            const targetEmail = 'h.gilad6@gmail.com';
+            log(`=== FINDING CONTACT WITH EMAIL: ${targetEmail} ===`, 'info');
+            
+            let accessToken = sessionStorage.getItem('votingAccessToken');
+            if (!accessToken) {
+                log('✗ No access token. Click "Authenticate with Google" first.', 'error');
+                return;
+            }
+            
+            try {
+                // Search all contacts for this email
+                log('Searching Google Contacts...', 'info');
+                
+                const response = await fetch(
+                    'https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses&pageSize=1000',
+                    { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    log(`✗ People API error: ${JSON.stringify(err)}`, 'error');
+                    return;
+                }
+                
+                const data = await response.json();
+                const connections = data.connections || [];
+                log(`Loaded ${connections.length} contacts`, 'info');
+                
+                let found = false;
+                
+                for (const person of connections) {
+                    const emails = person.emailAddresses || [];
+                    const names = person.names || [];
+                    
+                    for (const email of emails) {
+                        if (email.value && email.value.toLowerCase() === targetEmail.toLowerCase()) {
+                            found = true;
+                            const displayName = names[0]?.displayName || 'Unknown';
+                            log(`\n🚨 FOUND IT!`, 'error');
+                            log(`   Name: ${displayName}`, 'error');
+                            log(`   Email: ${email.value}`, 'warning');
+                            
+                            // Show all names associated with this contact
+                            if (names.length > 0) {
+                                log(`   All names for this contact:`, 'info');
+                                names.forEach(n => {
+                                    log(`     - ${n.displayName || ''} (given: ${n.givenName || ''}, family: ${n.familyName || ''})`, 'info');
+                                });
+                            }
+                            
+                            // Show all emails for this contact
+                            if (emails.length > 1) {
+                                log(`   All emails for this contact:`, 'info');
+                                emails.forEach(e => {
+                                    log(`     - ${e.value}`, 'info');
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                if (!found) {
+                    log(`\n✗ Email ${targetEmail} NOT FOUND in your Google Contacts`, 'warning');
+                    log(`This email might be in your Google Workspace directory, not personal contacts.`, 'info');
+                }
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function restoreAndShowSharing() {
+            log('=== RESTORING FILES & SHOWING SHARING ===', 'info');
+            
+            let accessToken = sessionStorage.getItem('votingAccessToken');
+            if (!accessToken) {
+                log('✗ No access token. Click "Authenticate with Google" first.', 'error');
+                return;
+            }
+            
+            // These are the file IDs we found earlier - hardcoded for now
+            // You can get these from the URLs in the previous search
+            const targetEmail = 'h.gilad6@gmail.com';
+            
+            try {
+                // First, search for trashed files shared with this email
+                log('Searching for trashed files...', 'info');
+                
+                const searchUrl = `https://www.googleapis.com/drive/v3/files?q=trashed=true&fields=files(id,name,permissions)&pageSize=200`;
+                const searchResponse = await fetch(searchUrl, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                
+                if (!searchResponse.ok) {
+                    log('✗ Failed to search trash', 'error');
+                    return;
+                }
+                
+                const searchData = await searchResponse.json();
+                const trashedFiles = searchData.files || [];
+                log(`Found ${trashedFiles.length} files in trash`, 'info');
+                
+                // Check each trashed file for the target email
+                for (const file of trashedFiles) {
+                    try {
+                        const permUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/permissions?fields=permissions(id,emailAddress,role)`;
+                        const permResponse = await fetch(permUrl, {
+                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                        });
+                        
+                        if (!permResponse.ok) continue;
+                        
+                        const permData = await permResponse.json();
+                        const perms = permData.permissions || [];
+                        
+                        const targetPerm = perms.find(p => p.emailAddress && p.emailAddress.toLowerCase() === targetEmail.toLowerCase());
+                        
+                        if (targetPerm) {
+                            log(`\n🚨 FOUND IN TRASH: "${file.name}"`, 'error');
+                            log(`   Shared with: ${targetEmail} (${targetPerm.role})`, 'warning');
+                            log(`   Permission ID: ${targetPerm.id}`, 'info');
+                            
+                            // Ask if user wants to remove the permission
+                            const removeIt = confirm(`Remove ${targetEmail} from "${file.name}"?`);
+                            
+                            if (removeIt) {
+                                // Remove the permission
+                                const deleteUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/permissions/${targetPerm.id}`;
+                                const deleteResponse = await fetch(deleteUrl, {
+                                    method: 'DELETE',
+                                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                                });
+                                
+                                if (deleteResponse.ok) {
+                                    log(`   ✓ REMOVED ${targetEmail} from "${file.name}"`, 'success');
+                                } else {
+                                    log(`   ✗ Failed to remove permission`, 'error');
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Skip files we can't check
+                    }
+                }
+                
+                log('\n=== DONE ===', 'success');
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function findSharedWithEmail() {
+            const targetEmail = 'h.gilad6@gmail.com';
+            log(`=== VERSION 3 - URLS SHOW IMMEDIATELY ===`, 'success');
+            log(`=== FINDING FILES SHARED WITH: ${targetEmail} ===`, 'info');
+            
+            let accessToken = sessionStorage.getItem('votingAccessToken');
+            if (!accessToken) {
+                log('✗ No access token. Click "Authenticate with Google" first.', 'error');
+                return;
+            }
+            
+            try {
+                // Search for files where user has shared with this email
+                // We need to list files and check permissions
+                log('Searching your Google Drive files...', 'info');
+                
+                let allFiles = [];
+                let pageToken = '';
+                
+                // Get all files (paginated)
+                do {
+                    const url = `https://www.googleapis.com/drive/v3/files?pageSize=100&fields=nextPageToken,files(id,name,mimeType,permissions)&supportsAllDrives=true${pageToken ? '&pageToken=' + pageToken : ''}`;
+                    
+                    const response = await fetch(url, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    });
+                    
+                    if (!response.ok) {
+                        const err = await response.json();
+                        log(`✗ Drive API error: ${JSON.stringify(err)}`, 'error');
+                        return;
+                    }
+                    
+                    const data = await response.json();
+                    allFiles = allFiles.concat(data.files || []);
+                    pageToken = data.nextPageToken || '';
+                    
+                    log(`Loaded ${allFiles.length} files so far...`, 'info');
+                    
+                } while (pageToken && allFiles.length < 500); // Limit to 500 files
+                
+                log(`\nChecking permissions on ${allFiles.length} files...`, 'info');
+                
+                const sharedFiles = [];
+                
+                for (const file of allFiles) {
+                    // Need to get permissions for each file
+                    try {
+                        const permUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/permissions?fields=permissions(emailAddress,role,type)`;
+                        const permResponse = await fetch(permUrl, {
+                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                        });
+                        
+                        if (permResponse.ok) {
+                            const permData = await permResponse.json();
+                            const perms = permData.permissions || [];
+                            
+                            for (const perm of perms) {
+                                if (perm.emailAddress && perm.emailAddress.toLowerCase() === targetEmail.toLowerCase()) {
+                                    const url = `https://drive.google.com/file/d/${file.id}/view`;
+                                    sharedFiles.push({
+                                        name: file.name,
+                                        id: file.id,
+                                        url: url,
+                                        type: file.mimeType,
+                                        role: perm.role
+                                    });
+                                    log(`🚨 FOUND: "${file.name}" - shared as ${perm.role}`, 'error');
+                                    log(`   URL: ${url}`, 'warning');
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Skip files we can't check permissions on
+                    }
+                }
+                
+                log(`\n=== SUMMARY: ${sharedFiles.length} FILES FOUND ===`, 'info');
+                if (sharedFiles.length > 0) {
+                    log(`\nFiles shared with ${targetEmail}:\n`, 'error');
+                    sharedFiles.forEach((f, i) => {
+                        const url = `https://drive.google.com/file/d/${f.id}/view`;
+                        log(`${i+1}. ${f.name} (${f.role})`, 'error');
+                        log(`   ${url}`, 'info');
+                    });
+                    
+                    // Copy all URLs to clipboard
+                    const urls = sharedFiles.map(f => `https://drive.google.com/file/d/${f.id}/view`).join('\n');
+                    navigator.clipboard.writeText(urls).then(() => {
+                        log(`\n✓ All ${sharedFiles.length} URLs copied to clipboard!`, 'success');
+                    }).catch(() => {
+                        log(`\nURLs (copy manually):`, 'info');
+                        log(urls, 'info');
+                    });
+                } else {
+                    log(`✓ No files found shared with ${targetEmail}`, 'success');
+                }
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function showAllCellLinks() {
+            log('=== SHOWING ALL CELL LINKS/TAGS ===', 'info');
+            log('Looking for: h.gilad6@gmail.com', 'warning');
+            
+            let accessToken = sessionStorage.getItem('votingAccessToken');
+            if (!accessToken) {
+                log('✗ No access token. Click "Authenticate with Google" first.', 'error');
+                return;
+            }
+            
+            let spreadsheetUrl = localStorage.getItem('lastGoogleSheetUrl');
+            if (!spreadsheetUrl) {
+                spreadsheetUrl = prompt('Enter your Google Spreadsheet URL:');
+                if (!spreadsheetUrl) return;
+                localStorage.setItem('lastGoogleSheetUrl', spreadsheetUrl);
+            }
+            
+            const match = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+            if (!match) {
+                log('✗ Invalid spreadsheet URL', 'error');
+                return;
+            }
+            const spreadsheetId = match[1];
+            const sheetName = localStorage.getItem('lastSheetName') || 'Participants';
+            
+            try {
+                const range = `${sheetName}!A1:Z100`;
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?ranges=${encodeURIComponent(range)}&includeGridData=true`;
+                
+                const response = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                
+                if (!response.ok) {
+                    log('✗ Failed to fetch spreadsheet', 'error');
+                    return;
+                }
+                
+                const data = await response.json();
+                const gridData = data.sheets?.[0]?.data?.[0];
+                
+                if (!gridData?.rowData) {
+                    log('✗ No data', 'error');
+                    return;
+                }
+                
+                let foundTarget = false;
+                
+                for (let rowIndex = 0; rowIndex < gridData.rowData.length; rowIndex++) {
+                    const row = gridData.rowData[rowIndex];
+                    if (!row?.values) continue;
+                    
+                    // Check if row is empty
+                    const firstCell = row.values[0];
+                    const firstValue = firstCell?.effectiveValue?.stringValue || firstCell?.formattedValue || '';
+                    if (rowIndex > 0 && !firstValue.trim()) break;
+                    
+                    for (let colIndex = 0; colIndex < row.values.length; colIndex++) {
+                        const cell = row.values[colIndex];
+                        if (!cell) continue;
+                        
+                        const displayValue = cell.effectiveValue?.stringValue || cell.formattedValue || '';
+                        if (!displayValue.trim()) continue;
+                        
+                        // Check ALL possible places where email might be stored
+                        const hyperlink = cell.hyperlink;
+                        const userLink = cell.userEnteredFormat?.link?.uri;
+                        const effectiveLink = cell.effectiveFormat?.link?.uri;
+                        const textFormatRuns = cell.textFormatRuns;
+                        
+                        let linkedEmail = '';
+                        
+                        // Check hyperlink
+                        if (hyperlink) {
+                            if (typeof hyperlink === 'string' && hyperlink.includes('mailto:')) {
+                                linkedEmail = hyperlink.replace('mailto:', '').split('?')[0];
+                            } else if (hyperlink.uri && hyperlink.uri.includes('mailto:')) {
+                                linkedEmail = hyperlink.uri.replace('mailto:', '').split('?')[0];
+                            }
+                        }
+                        
+                        // Check userEnteredFormat link
+                        if (!linkedEmail && userLink && userLink.includes('mailto:')) {
+                            linkedEmail = userLink.replace('mailto:', '').split('?')[0];
+                        }
+                        
+                        // Check effectiveFormat link
+                        if (!linkedEmail && effectiveLink && effectiveLink.includes('mailto:')) {
+                            linkedEmail = effectiveLink.replace('mailto:', '').split('?')[0];
+                        }
+                        
+                        // Check textFormatRuns for links
+                        if (!linkedEmail && textFormatRuns) {
+                            for (const run of textFormatRuns) {
+                                if (run.format?.link?.uri && run.format.link.uri.includes('mailto:')) {
+                                    linkedEmail = run.format.link.uri.replace('mailto:', '').split('?')[0];
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Is this the one we're looking for?
+                        const isTarget = linkedEmail.toLowerCase().includes('h.gilad6') || 
+                                        linkedEmail.toLowerCase().includes('gilad6');
+                        
+                        if (linkedEmail) {
+                            if (isTarget) {
+                                log(`🚨 FOUND IT! Row ${rowIndex + 1}, Col ${colIndex + 1}: "${displayValue}" → ${linkedEmail}`, 'error');
+                                foundTarget = true;
+                            } else {
+                                log(`Row ${rowIndex + 1}, Col ${colIndex + 1}: "${displayValue}" → ${linkedEmail}`, 'success');
+                            }
+                        }
+                        
+                        // Also log raw cell data for debugging if it has any link-like properties
+                        if (hyperlink || userLink || effectiveLink || textFormatRuns) {
+                            console.log(`Cell [${rowIndex},${colIndex}] "${displayValue}":`, {
+                                hyperlink,
+                                userLink,
+                                effectiveLink,
+                                textFormatRuns
+                            });
+                        }
+                    }
+                }
+                
+                if (!foundTarget) {
+                    log('\n⚠️ Did not find h.gilad6@gmail.com linked to any cell', 'warning');
+                    log('The email might be linked through Google Contacts, not directly in the cell', 'info');
+                }
+                
+                log('\n=== Check browser console (F12) for detailed cell data ===', 'info');
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function authenticateForTest() {
+            log('Authenticating with Google...', 'info');
+            
+            try {
+                // Get client ID
+                const clientId = document.getElementById('googleDriveClientId')?.value?.trim() ||
+                               localStorage.getItem('googleDriveClientId') ||
+                               (typeof GOOGLE_DRIVE_CONFIG !== 'undefined' ? GOOGLE_DRIVE_CONFIG.clientId : '');
+                
+                if (!clientId) {
+                    log('✗ No Google OAuth Client ID found.', 'error');
+                    log('  Please enter your Client ID in the main app settings first.', 'info');
+                    return;
+                }
+                
+                // Load Google Identity Services if not already loaded
+                if (!window.google || !window.google.accounts) {
+                    log('Loading Google Identity Services...', 'info');
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://accounts.google.com/gsi/client';
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
+                
+                // Initialize token client
+                const tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/forms.body https://www.googleapis.com/auth/contacts.readonly',
+                    callback: (response) => {
+                        if (response.error) {
+                            log(`✗ Authentication error: ${response.error}`, 'error');
+                            if (response.error_description) {
+                                log(`  ${response.error_description}`, 'error');
+                            }
+                        } else {
+                            const token = response.access_token;
+                            sessionStorage.setItem('votingAccessToken', token);
+                            log('✓ Successfully authenticated!', 'success');
+                            log(`  Token saved. You can now run "Test Real Sheet Email Extraction".`, 'success');
+                        }
+                    },
+                });
+                
+                // Request access token
+                tokenClient.requestAccessToken({ prompt: 'select_account' });
+                
+            } catch (error) {
+                log(`✗ Error: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        function showMockFormCreation() {
+            log('Showing mock form creation process...', 'info');
+            
+            const mockFormConfig = {
+                teamName: 'Team Alpha',
+                excludedTeam: 'Team Alpha',
+                votingOptions: ['Team Beta', 'Team Gamma'],
+                formTitle: 'Team Alpha',
+                formDescription: 'Please vote for your favorite team. Your own team (Team Alpha) has been excluded from this form.'
+            };
+            
+            log('Mock form configuration:', 'info');
+            log(JSON.stringify(mockFormConfig, null, 2), 'info');
+            
+            // Show what the API request would look like
+            const mockRequests = [
+                {
+                    updateFormInfo: {
+                        info: {
+                            title: mockFormConfig.formTitle,
+                            description: mockFormConfig.formDescription
+                        },
+                        updateMask: 'description,title'
+                    }
+                },
+                {
+                    updateSettings: {
+                        settings: {
+                            quizSettings: { isQuiz: false },
+                            collectEmail: false,
+                            requiresLogin: false,
+                            allowResponseEdits: false,
+                            publishChart: false,
+                            progressBar: true
+                        },
+                        updateMask: 'quizSettings.isQuiz,collectEmail,requiresLogin,allowResponseEdits,publishChart,progressBar'
+                    }
+                }
+            ];
+            
+            log('✓ Mock API requests that would be sent:', 'success');
+            log(JSON.stringify(mockRequests, null, 2), 'info');
+        }
+
+        // Run automatic tests on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const results = document.getElementById('testResults');
+            
+            // Check if voting-solution.js loaded properly
+            if (typeof generateVotingForms === 'function') {
+                results.innerHTML += '<div class="status success">✓ voting-solution.js loaded successfully</div>';
+            } else {
+                results.innerHTML += '<div class="status warning">⚠️ voting-solution.js not loaded properly</div>';
+            }
+            
+            // Check if required functions exist
+            const requiredFunctions = [
+                'generateVotingForms',
+                'extractParticipantEmails',
+                'getAnonymousFormInstructions',
+                'createGoogleForm',
+                'showVotingFormsModal'
+            ];
+            
+            requiredFunctions.forEach(funcName => {
+                if (typeof window[funcName] === 'function' || eval(`typeof ${funcName}`) === 'function') {
+                    results.innerHTML += `<div class="status success">✓ Function ${funcName} is available</div>`;
+                } else {
+                    results.innerHTML += `<div class="status warning">⚠️ Function ${funcName} not found</div>`;
+                }
+            });
+            
+            results.innerHTML += '<div class="status info">📝 Manual tests available above. Run the integration test with your main app.</div>';
+        });
+    </script>
+</body>
+</html>

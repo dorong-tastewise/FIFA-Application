@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Export Test - FIFA Draw Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #ffd700;
+        }
+
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .test-section h2 {
+            margin-bottom: 15px;
+            color: #4ecdc4;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            color: white;
+            font-size: 14px;
+        }
+
+        input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(145deg, #4CAF50, #66BB6A);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+            color: #4CAF50;
+        }
+
+        .status.error {
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.5);
+            color: #ff6b6b;
+        }
+
+        .status.info {
+            background: rgba(255, 215, 0, 0.2);
+            border: 1px solid rgba(255, 215, 0, 0.5);
+            color: #ffd700;
+        }
+
+        .log {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-left: 3px solid #4ecdc4;
+            padding-left: 10px;
+        }
+
+        .log-entry.error {
+            border-left-color: #ff6b6b;
+            color: #ff6b6b;
+        }
+
+        .log-entry.success {
+            border-left-color: #4CAF50;
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 OAuth Export Test</h1>
+        
+        <div class="test-section">
+            <h2>Step 1: Enter OAuth Client ID</h2>
+            <label for="clientId">Google OAuth Client ID:</label>
+            <input type="text" id="clientId" placeholder="123456789-abc.apps.googleusercontent.com">
+            <button id="saveClientId">Save Client ID</button>
+            <div id="clientIdStatus" class="status" style="display: none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Step 2: Initialize & Sign In</h2>
+            <button id="initBtn">Initialize Google API</button>
+            <button id="signInBtn" disabled>Sign In with Google</button>
+            <button id="signOutBtn" disabled>Sign Out</button>
+            <div id="authStatus" class="status" style="display: none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Step 3: Test Export</h2>
+            <label for="spreadsheetUrl">Google Sheets URL (optional - leave blank to create new):</label>
+            <input type="text" id="spreadsheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...">
+            <button id="testExportBtn" disabled>Test Export</button>
+            <div id="exportStatus" class="status" style="display: none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Console Log</h2>
+            <div id="log" class="log"></div>
+            <button id="clearLog">Clear Log</button>
+        </div>
+    </div>
+
+    <!-- Load Google Identity Services (new library) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Load Google API for Sheets API calls -->
+    <script src="https://apis.google.com/js/api.js" onload="log('Google API script loaded', 'success')" onerror="log('Failed to load Google API script', 'error')"></script>
+    
+    <script>
+        // Logging utility (needs to be available before script loads)
+        const logDiv = document.getElementById('log');
+        function log(message, type = 'info') {
+            if (!logDiv) {
+                console.log(`[${type}] ${message}`);
+                return;
+            }
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}] ${message}`);
+        }
+
+        // Check if Google Identity Services is loaded
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (window.google && window.google.accounts) {
+                    log('Google Identity Services is available', 'success');
+                } else {
+                    log('Warning: Google Identity Services not found. Check if script loaded.', 'error');
+                }
+                if (typeof gapi !== 'undefined') {
+                    log('Google API (gapi) is available', 'success');
+                }
+            }, 1000);
+        });
+
+        document.getElementById('clearLog').addEventListener('click', () => {
+            logDiv.innerHTML = '';
+        });
+
+        // OAuth Configuration
+        let accessToken = null;
+        let clientId = '';
+
+        // Load saved Client ID from localStorage
+        const savedClientId = localStorage.getItem('googleDriveClientId');
+        if (savedClientId) {
+            document.getElementById('clientId').value = savedClientId;
+            clientId = savedClientId;
+            log(`Loaded Client ID from localStorage: ${savedClientId.substring(0, 20)}...`, 'success');
+        }
+
+        // Save Client ID
+        document.getElementById('saveClientId').addEventListener('click', () => {
+            const input = document.getElementById('clientId').value.trim();
+            if (!input) {
+                showStatus('clientIdStatus', 'Please enter a Client ID', 'error');
+                return;
+            }
+            clientId = input;
+            localStorage.setItem('googleDriveClientId', clientId);
+            showStatus('clientIdStatus', `✓ Client ID saved: ${clientId.substring(0, 20)}...`, 'success');
+            log(`Client ID saved: ${clientId.substring(0, 20)}...`, 'success');
+            document.getElementById('initBtn').disabled = false;
+        });
+
+        // Initialize Google API (using new Google Identity Services)
+        document.getElementById('initBtn').addEventListener('click', async () => {
+            if (!clientId) {
+                showStatus('authStatus', 'Please save a Client ID first', 'error');
+                return;
+            }
+
+            try {
+                showStatus('authStatus', 'Initializing Google Identity Services...', 'info');
+                log('Initializing Google Identity Services...', 'info');
+
+                // Wait for Google Identity Services to load
+                await new Promise((resolve) => {
+                    if (window.google && window.google.accounts) {
+                        resolve();
+                    } else {
+                        const checkInterval = setInterval(() => {
+                            if (window.google && window.google.accounts) {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                        setTimeout(() => {
+                            clearInterval(checkInterval);
+                            resolve(); // Resolve anyway after 5 seconds
+                        }, 5000);
+                    }
+                });
+
+                if (!window.google || !window.google.accounts) {
+                    throw new Error('Google Identity Services not loaded. Please refresh the page.');
+                }
+
+                log('Google Identity Services loaded', 'success');
+                showStatus('authStatus', '✓ Initialized! Click "Sign In" to continue', 'success');
+                log('Google Identity Services initialized successfully', 'success');
+                document.getElementById('signInBtn').disabled = false;
+            } catch (error) {
+                showStatus('authStatus', `Error: ${error.message}`, 'error');
+                log(`Initialization error: ${error.message}`, 'error');
+                log(`Error details: ${JSON.stringify(error)}`, 'error');
+                if (error.stack) {
+                    log(`Stack: ${error.stack}`, 'error');
+                }
+            }
+        });
+
+        // Sign In (using new Google Identity Services)
+        document.getElementById('signInBtn').addEventListener('click', async () => {
+            try {
+                if (!window.google || !window.google.accounts) {
+                    throw new Error('Google Identity Services not loaded');
+                }
+
+                showStatus('authStatus', 'Signing in...', 'info');
+                log('Signing in to Google...', 'info');
+
+                // Use the new Google Identity Services OAuth2 flow
+                const tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets',
+                    callback: (response) => {
+                        if (response.error) {
+                            showStatus('authStatus', `Sign-in error: ${response.error}`, 'error');
+                            log(`Sign-in error: ${response.error}`, 'error');
+                            if (response.error_description) {
+                                log(`Error description: ${response.error_description}`, 'error');
+                            }
+                        } else {
+                            accessToken = response.access_token;
+                            showStatus('authStatus', '✓ Signed in successfully!', 'success');
+                            log('Signed in successfully', 'success');
+                            log(`Access token: ${accessToken.substring(0, 20)}...`, 'success');
+                            
+                            document.getElementById('signOutBtn').disabled = false;
+                            document.getElementById('testExportBtn').disabled = false;
+                        }
+                    },
+                });
+
+                // Request access token
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } catch (error) {
+                showStatus('authStatus', `Sign-in error: ${error.message}`, 'error');
+                log(`Sign-in error: ${error.message}`, 'error');
+            }
+        });
+
+        // Sign Out
+        document.getElementById('signOutBtn').addEventListener('click', () => {
+            if (accessToken && window.google && window.google.accounts) {
+                google.accounts.oauth2.revoke(accessToken, () => {
+                    log('Access token revoked', 'info');
+                });
+            }
+            accessToken = null;
+            showStatus('authStatus', 'Signed out', 'info');
+            log('Signed out', 'info');
+            document.getElementById('signOutBtn').disabled = true;
+            document.getElementById('testExportBtn').disabled = true;
+        });
+
+        // Test Export
+        document.getElementById('testExportBtn').addEventListener('click', async () => {
+            if (!accessToken) {
+                showStatus('exportStatus', 'Please sign in first', 'error');
+                return;
+            }
+
+            const spreadsheetUrl = document.getElementById('spreadsheetUrl').value.trim();
+            let spreadsheetId;
+
+            try {
+                if (spreadsheetUrl) {
+                    const match = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+                    if (!match) {
+                        showStatus('exportStatus', 'Invalid Google Sheets URL', 'error');
+                        return;
+                    }
+                    spreadsheetId = match[1];
+                    log(`Using existing spreadsheet: ${spreadsheetId}`, 'info');
+                } else {
+                    showStatus('exportStatus', 'Creating new spreadsheet...', 'info');
+                    log('Creating new spreadsheet...', 'info');
+
+                    const createResponse = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`
+                        },
+                        body: JSON.stringify({
+                            properties: {
+                                title: 'OAuth Test - Draw Results'
+                            }
+                        })
+                    });
+
+                    if (!createResponse.ok) {
+                        const errorData = await createResponse.json();
+                        throw new Error(errorData.error?.message || 'Failed to create spreadsheet');
+                    }
+
+                    const createData = await createResponse.json();
+                    spreadsheetId = createData.spreadsheetId;
+                    showStatus('exportStatus', `✓ Created spreadsheet: ${spreadsheetId}`, 'success');
+                    log(`Created spreadsheet: ${spreadsheetId}`, 'success');
+                }
+
+                // Test data
+                const testData = [
+                    ['Group', 'A', 'B', 'C'],
+                    ['Entry 1', 'Team 1', 'Team 2', 'Team 3'],
+                    ['Entry 2', 'Team 4', 'Team 5', 'Team 6']
+                ];
+
+                showStatus('exportStatus', 'Writing test data...', 'info');
+                log('Writing test data...', 'info');
+
+                // Write values
+                const range = 'Participants!A1';
+                const valuesUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW`;
+                
+                const valuesResponse = await fetch(valuesUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: JSON.stringify({
+                        values: testData
+                    })
+                });
+
+                if (!valuesResponse.ok) {
+                    const errorData = await valuesResponse.json();
+                    throw new Error(errorData.error?.message || 'Failed to write values');
+                }
+
+                showStatus('exportStatus', `✓ Export successful! <a href="https://docs.google.com/spreadsheets/d/${spreadsheetId}" target="_blank" style="color: #4CAF50;">Open Sheet</a>`, 'success');
+                log('Export successful!', 'success');
+                log(`Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId}`, 'success');
+
+            } catch (error) {
+                showStatus('exportStatus', `Export error: ${error.message}`, 'error');
+                log(`Export error: ${error.message}`, 'error');
+            }
+        });
+
+        function showStatus(elementId, message, type) {
+            const statusDiv = document.getElementById(elementId);
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
+

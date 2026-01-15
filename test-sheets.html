@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Google Sheets Loading</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        .container {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            border: 1px solid #555;
+        }
+        input {
+            width: 400px;
+            background: #2a2a3e;
+            color: white;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .output {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .error {
+            color: #ff6b6b;
+        }
+        .success {
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Google Sheets Loading</h1>
+        
+        <div>
+            <label>Google Sheets URL:</label><br>
+            <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...">
+        </div>
+        
+        <div>
+            <label>API Key:</label><br>
+            <input type="text" id="apiKey" placeholder="Your Google Sheets API key">
+        </div>
+        
+        <div>
+            <label>Sheet Name (optional):</label><br>
+            <input type="text" id="sheetName" value="Participants" placeholder="Participants">
+        </div>
+        
+        <button onclick="loadSheet()">Load Participants Sheet</button>
+        <button onclick="testTopicsSheet()">Test Topics Sheet</button>
+        <button onclick="testCannotBeWithSheet()">Test CannotBeWith Sheet</button>
+        <button onclick="testMustBeWithSheet()">Test MustBeWith Sheet</button>
+        <button onclick="testAllConstraintSheets()">Test All Constraint Sheets</button>
+        
+        <div id="output" class="output"></div>
+    </div>
+
+    <script>
+        // Extract spreadsheet ID from Google Sheets URL
+        function extractSpreadsheetId(url) {
+            const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+            return match ? match[1] : null;
+        }
+
+        // Fetch data from Google Sheets
+        async function fetchGoogleSheetData(apiKey, spreadsheetId, sheetName = 'Participants') {
+            try {
+                const range = `${sheetName}!A1:Z1000`;
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${apiKey}`;
+
+                log('Fetching from URL: ' + url.replace(apiKey, 'API_KEY_HIDDEN'));
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    log('API Error: ' + JSON.stringify(errorData, null, 2), 'error');
+                    throw new Error(errorData.error?.message || 'Failed to fetch Google Sheets data');
+                }
+
+                const data = await response.json();
+                log('Raw API Response:');
+                log(JSON.stringify(data, null, 2));
+                log('\nValues array length: ' + (data.values?.length || 0));
+                
+                return data.values || [];
+            } catch (error) {
+                log('Fetch Error: ' + error.message, 'error');
+                throw error;
+            }
+        }
+
+        // Parse Google Sheets data into pots format
+        function parseSheetDataToPots(sheetData) {
+            if (!sheetData || sheetData.length === 0) {
+                throw new Error('Sheet is empty');
+            }
+
+            log('\n=== PARSING SHEET DATA ===');
+            log('Total rows: ' + sheetData.length);
+            log('First row (headers): ' + JSON.stringify(sheetData[0]));
+
+            const headers = sheetData[0] || [];
+            const pots = [];
+
+            log('\nHeaders from first row: ' + JSON.stringify(headers));
+            log('Number of columns: ' + headers.length);
+
+            // Create a pot for each column
+            for (let colIndex = 0; colIndex < headers.length; colIndex++) {
+                // Get pot name from first row (header)
+                const potName = (headers[colIndex] || '').trim();
+                log(`\nColumn ${colIndex}: header = "${potName}"`);
+                
+                // Use the header as pot name - if empty, use default name
+                const finalPotName = potName || `Pot ${colIndex + 1}`;
+
+                const entries = [];
+
+                // Collect entries from rows below the header (starting from row 2, index 1)
+                for (let rowIndex = 1; rowIndex < sheetData.length; rowIndex++) {
+                    const row = sheetData[rowIndex];
+                    if (!row || !Array.isArray(row)) continue;
+                    const entry = (row[colIndex] || '').trim();
+                    if (entry) {
+                        entries.push(entry);
+                    }
+                }
+
+                log(`  Pot "${finalPotName}" has ${entries.length} entries:`);
+                log(`  Entries: ${JSON.stringify(entries)}`);
+
+                pots.push({
+                    name: finalPotName,
+                    entries: entries
+                });
+            }
+
+            log('\n=== PARSED POTS ===');
+            log(JSON.stringify(pots, null, 2));
+            
+            return pots;
+        }
+
+        // Load pots from Google Sheets
+        async function loadPotsFromGoogleSheets(apiKey, sheetUrl, sheetName) {
+            const spreadsheetId = extractSpreadsheetId(sheetUrl);
+            if (!spreadsheetId) {
+                throw new Error('Invalid Google Sheets URL');
+            }
+
+            log('Spreadsheet ID: ' + spreadsheetId);
+            const sheetData = await fetchGoogleSheetData(apiKey, spreadsheetId, sheetName);
+            const pots = parseSheetDataToPots(sheetData);
+
+            if (pots.length === 0) {
+                throw new Error('No pots found in the sheet');
+            }
+
+            return pots;
+        }
+
+        // Logging function
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
+            output.innerHTML += `<div class="${className}">${message}</div>`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        // Clear output
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        // Main load function
+        async function loadSheet() {
+            clearOutput();
+            
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const sheetName = document.getElementById('sheetName').value.trim() || 'Participants';
+
+            if (!sheetUrl || !apiKey) {
+                log('Please enter both Sheet URL and API Key', 'error');
+                return;
+            }
+
+            try {
+                log('=== STARTING LOAD ===', 'success');
+                log('Sheet URL: ' + sheetUrl);
+                log('Sheet Name: ' + sheetName);
+                log('API Key: ' + (apiKey ? 'Present' : 'Missing'), apiKey ? 'success' : 'error');
+                
+                const pots = await loadPotsFromGoogleSheets(apiKey, sheetUrl, sheetName);
+                
+                log('\n=== FINAL RESULT ===', 'success');
+                log('Number of pots: ' + pots.length);
+                pots.forEach((pot, index) => {
+                    log(`\nPot ${index + 1}: "${pot.name}"`);
+                    log(`  Entries (${pot.entries.length}): ${JSON.stringify(pot.entries)}`);
+                });
+                
+                log('\n=== SUCCESS ===', 'success');
+                log('All pots loaded successfully!');
+                
+            } catch (error) {
+                log('\n=== ERROR ===', 'error');
+                log(error.message, 'error');
+                log('\nStack trace: ' + error.stack, 'error');
+            }
+        }
+
+        // Load constraints from CannotBeWith sheet
+        async function loadCannotBeWithConstraints(apiKey, sheetUrl) {
+            try {
+                const spreadsheetId = extractSpreadsheetId(sheetUrl);
+                if (!spreadsheetId) {
+                    throw new Error('Invalid Google Sheets URL');
+                }
+
+                log('\n=== LOADING CANNOTBEWITH SHEET ===');
+                log('Spreadsheet ID: ' + spreadsheetId);
+                
+                const sheetData = await fetchGoogleSheetData(apiKey, spreadsheetId, 'CannotBeWith');
+                
+                if (!sheetData || sheetData.length === 0) {
+                    log('CannotBeWith sheet is empty or not found', 'error');
+                    return null;
+                }
+
+                log('Raw sheet data:');
+                log(JSON.stringify(sheetData, null, 2));
+                log('\nTotal rows: ' + sheetData.length);
+
+                // Extract pairs from columns A and B (each row is a pair)
+                // Skip first row if it looks like a header
+                const headerKeywords = ['entry', 'name', 'participant', 'person', 'team', 'cannot', 'must'];
+                let startRow = 0;
+                
+                if (sheetData.length > 0 && sheetData[0] && sheetData[0][0]) {
+                    const firstCell = sheetData[0][0].toLowerCase().trim();
+                    if (headerKeywords.some(keyword => firstCell.includes(keyword))) {
+                        startRow = 1;
+                        log('Header row detected, skipping first row');
+                    }
+                }
+                
+                const pairs = [];
+                for (let i = startRow; i < sheetData.length; i++) {
+                    const row = sheetData[i];
+                    if (row && row[0] && row[1]) {
+                        const entry1 = row[0].trim();
+                        const entry2 = row[1].trim();
+                        if (entry1 && entry2 && entry1.length > 0 && entry2.length > 0) {
+                            pairs.push([entry1, entry2]);
+                            log(`Row ${i + 1}: ["${entry1}", "${entry2}"]`);
+                        }
+                    }
+                }
+
+                if (pairs.length === 0) {
+                    log('No valid pairs found in CannotBeWith sheet', 'error');
+                    return null;
+                }
+
+                log('\n=== CANNOTBEWITH CONSTRAINTS ===', 'success');
+                log('Total pairs: ' + pairs.length);
+                log('Pairs: ' + JSON.stringify(pairs, null, 2));
+                return pairs;
+            } catch (error) {
+                log('Error loading CannotBeWith sheet: ' + error.message, 'error');
+                throw error;
+            }
+        }
+
+        // Load constraints from MustBeWith sheet
+        async function loadMustBeWithConstraints(apiKey, sheetUrl) {
+            try {
+                const spreadsheetId = extractSpreadsheetId(sheetUrl);
+                if (!spreadsheetId) {
+                    throw new Error('Invalid Google Sheets URL');
+                }
+
+                log('\n=== LOADING MUSTBEWITH SHEET ===');
+                log('Spreadsheet ID: ' + spreadsheetId);
+                
+                const sheetData = await fetchGoogleSheetData(apiKey, spreadsheetId, 'MustBeWith');
+                
+                if (!sheetData || sheetData.length === 0) {
+                    log('MustBeWith sheet is empty or not found', 'error');
+                    return null;
+                }
+
+                log('Raw sheet data:');
+                log(JSON.stringify(sheetData, null, 2));
+                log('\nTotal rows: ' + sheetData.length);
+
+                // Extract pairs from columns A and B (each row is a pair)
+                // Skip first row if it looks like a header
+                const headerKeywords = ['entry', 'name', 'participant', 'person', 'team', 'cannot', 'must'];
+                let startRow = 0;
+                
+                if (sheetData.length > 0 && sheetData[0] && sheetData[0][0]) {
+                    const firstCell = sheetData[0][0].toLowerCase().trim();
+                    if (headerKeywords.some(keyword => firstCell.includes(keyword))) {
+                        startRow = 1;
+                        log('Header row detected, skipping first row');
+                    }
+                }
+                
+                const pairs = [];
+                for (let i = startRow; i < sheetData.length; i++) {
+                    const row = sheetData[i];
+                    if (row && row[0] && row[1]) {
+                        const entry1 = row[0].trim();
+                        const entry2 = row[1].trim();
+                        if (entry1 && entry2 && entry1.length > 0 && entry2.length > 0) {
+                            pairs.push([entry1, entry2]);
+                            log(`Row ${i + 1}: ["${entry1}", "${entry2}"]`);
+                        }
+                    }
+                }
+
+                if (pairs.length === 0) {
+                    log('No valid pairs found in MustBeWith sheet', 'error');
+                    return null;
+                }
+
+                log('\n=== MUSTBEWITH CONSTRAINTS ===', 'success');
+                log('Total pairs: ' + pairs.length);
+                log('Pairs: ' + JSON.stringify(pairs, null, 2));
+                return pairs;
+            } catch (error) {
+                log('Error loading MustBeWith sheet: ' + error.message, 'error');
+                throw error;
+            }
+        }
+
+        // Load group names from Topics sheet
+        async function loadGroupNamesFromTopicsSheet(apiKey, sheetUrl) {
+            try {
+                const spreadsheetId = extractSpreadsheetId(sheetUrl);
+                if (!spreadsheetId) {
+                    throw new Error('Invalid Google Sheets URL');
+                }
+
+                log('\n=== LOADING TOPICS SHEET ===');
+                log('Spreadsheet ID: ' + spreadsheetId);
+                
+                const topicsData = await fetchGoogleSheetData(apiKey, spreadsheetId, 'Topics');
+                
+                if (!topicsData || topicsData.length === 0) {
+                    log('Topics sheet is empty or not found', 'error');
+                    return null;
+                }
+
+                log('Raw sheet data:');
+                log(JSON.stringify(topicsData, null, 2));
+                log('\nTotal rows: ' + topicsData.length);
+
+                // Extract group names from column A (first column)
+                const groupNames = [];
+                for (let i = 0; i < topicsData.length; i++) {
+                    const row = topicsData[i];
+                    if (row && row[0]) {
+                        const name = row[0].trim();
+                        if (name) {
+                            groupNames.push(name);
+                            log(`Row ${i + 1}: "${name}"`);
+                        }
+                    }
+                }
+
+                if (groupNames.length === 0) {
+                    log('No group names found in Topics sheet', 'error');
+                    return null;
+                }
+
+                log('\n=== TOPICS (GROUP NAMES) ===', 'success');
+                log('Total group names: ' + groupNames.length);
+                log('Group names: ' + JSON.stringify(groupNames, null, 2));
+                return groupNames;
+            } catch (error) {
+                log('Error loading Topics sheet: ' + error.message, 'error');
+                throw error;
+            }
+        }
+
+        // Test Topics sheet
+        async function testTopicsSheet() {
+            clearOutput();
+            
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+
+            if (!sheetUrl || !apiKey) {
+                log('Please enter both Sheet URL and API Key', 'error');
+                return;
+            }
+
+            try {
+                log('=== TESTING TOPICS SHEET ===', 'success');
+                const groupNames = await loadGroupNamesFromTopicsSheet(apiKey, sheetUrl);
+                
+                if (groupNames && groupNames.length > 0) {
+                    log('\n✓ SUCCESS: Topics sheet loaded successfully!', 'success');
+                } else {
+                    log('\n⚠ WARNING: Topics sheet not found or empty', 'error');
+                }
+            } catch (error) {
+                log('\n✗ ERROR: ' + error.message, 'error');
+            }
+        }
+
+        // Test CannotBeWith sheet
+        async function testCannotBeWithSheet() {
+            clearOutput();
+            
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+
+            if (!sheetUrl || !apiKey) {
+                log('Please enter both Sheet URL and API Key', 'error');
+                return;
+            }
+
+            try {
+                log('=== TESTING CANNOTBEWITH SHEET ===', 'success');
+                const pairs = await loadCannotBeWithConstraints(apiKey, sheetUrl);
+                
+                if (pairs && pairs.length > 0) {
+                    log('\n✓ SUCCESS: CannotBeWith sheet loaded successfully!', 'success');
+                    log('Found ' + pairs.length + ' constraint pairs', 'success');
+                } else {
+                    log('\n⚠ WARNING: CannotBeWith sheet not found or empty', 'error');
+                }
+            } catch (error) {
+                log('\n✗ ERROR: ' + error.message, 'error');
+            }
+        }
+
+        // Test MustBeWith sheet
+        async function testMustBeWithSheet() {
+            clearOutput();
+            
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+
+            if (!sheetUrl || !apiKey) {
+                log('Please enter both Sheet URL and API Key', 'error');
+                return;
+            }
+
+            try {
+                log('=== TESTING MUSTBEWITH SHEET ===', 'success');
+                const pairs = await loadMustBeWithConstraints(apiKey, sheetUrl);
+                
+                if (pairs && pairs.length > 0) {
+                    log('\n✓ SUCCESS: MustBeWith sheet loaded successfully!', 'success');
+                    log('Found ' + pairs.length + ' constraint pairs', 'success');
+                } else {
+                    log('\n⚠ WARNING: MustBeWith sheet not found or empty', 'error');
+                }
+            } catch (error) {
+                log('\n✗ ERROR: ' + error.message, 'error');
+            }
+        }
+
+        // Test all constraint sheets
+        async function testAllConstraintSheets() {
+            clearOutput();
+            
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+
+            if (!sheetUrl || !apiKey) {
+                log('Please enter both Sheet URL and API Key', 'error');
+                return;
+            }
+
+            try {
+                log('=== TESTING ALL CONSTRAINT SHEETS ===', 'success');
+                
+                // Test Topics
+                log('\n--- Testing Topics Sheet ---');
+                const groupNames = await loadGroupNamesFromTopicsSheet(apiKey, sheetUrl);
+                
+                // Test CannotBeWith
+                log('\n--- Testing CannotBeWith Sheet ---');
+                const cannotBeWithPairs = await loadCannotBeWithConstraints(apiKey, sheetUrl);
+                
+                // Test MustBeWith
+                log('\n--- Testing MustBeWith Sheet ---');
+                const mustBeWithPairs = await loadMustBeWithConstraints(apiKey, sheetUrl);
+                
+                // Summary
+                log('\n=== SUMMARY ===', 'success');
+                log('Topics: ' + (groupNames ? groupNames.length + ' group names' : 'Not found'), groupNames ? 'success' : 'error');
+                log('CannotBeWith: ' + (cannotBeWithPairs ? cannotBeWithPairs.length + ' pairs' : 'Not found'), cannotBeWithPairs ? 'success' : 'error');
+                log('MustBeWith: ' + (mustBeWithPairs ? mustBeWithPairs.length + ' pairs' : 'Not found'), mustBeWithPairs ? 'success' : 'error');
+                
+                if (groupNames || cannotBeWithPairs || mustBeWithPairs) {
+                    log('\n✓ At least one sheet loaded successfully!', 'success');
+                } else {
+                    log('\n⚠ WARNING: No constraint sheets found', 'error');
+                }
+            } catch (error) {
+                log('\n✗ ERROR: ' + error.message, 'error');
+            }
+        }
+
+        // Load config if available
+        window.addEventListener('DOMContentLoaded', () => {
+            if (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.googleSheets?.apiKey) {
+                document.getElementById('apiKey').value = APP_CONFIG.googleSheets.apiKey;
+                log('API Key loaded from config.js', 'success');
+            }
+            
+            // Load last URL from localStorage
+            const lastUrl = localStorage.getItem('lastGoogleSheetUrl');
+            if (lastUrl) {
+                document.getElementById('sheetUrl').value = lastUrl;
+                log('Last sheet URL loaded from localStorage', 'success');
+            }
+        });
+    </script>
+    
+    <script src="config.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
