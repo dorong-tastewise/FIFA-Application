@@ -1376,11 +1376,29 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
     
+    // Clear all data sheets first (keep headers in row 1)
+    console.log('Clearing existing data from sheets...');
+    const sheetsToClear = [
+        'Participants Votes!A2:Z',
+        'Judges Votes!A2:Z',
+        'Participants Weighted Results!A2:Z',
+        'Judges Weighted Results!A2:Z',
+        'Final Weighted Results!A2:Z'
+    ];
+    
+    for (const range of sheetsToClear) {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+        });
+    }
+    console.log('✓ Cleared existing data');
+    
     // Write participant votes
     if (participantResponses.length > 0) {
         const data = participantResponses.map(r => [r.timestamp, r.email, r.form, r.category, r.project, r.rank, r.points]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Votes!A2:G')}?valueInputOption=RAW`, {
+            method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: data })
         });
@@ -1390,8 +1408,8 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     // Write judge votes
     if (judgeResponses.length > 0) {
         const data = judgeResponses.map(r => [r.timestamp, r.email, r.form, r.category, r.project, r.rank, r.points]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Votes!A2:G')}?valueInputOption=RAW`, {
+            method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: data })
         });
@@ -1428,8 +1446,8 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     // Write Participants Weighted Results
     if (participantWeighted.length > 0) {
         const data = participantWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Weighted Results!A2:E')}?valueInputOption=RAW`, {
+            method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: data })
         });
@@ -1439,8 +1457,8 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     // Write Judges Weighted Results
     if (judgesWeighted.length > 0) {
         const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Weighted Results!A2:E')}?valueInputOption=RAW`, {
+            method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: data })
         });
@@ -1463,8 +1481,8 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     finalResults.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]));
     
     if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:D')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST',
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:D')}?valueInputOption=RAW`, {
+            method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: finalResults })
         });
