@@ -365,11 +365,13 @@ async function exportToGoogleSheet() {
         const sheetData = [];
         const colorData = [];
 
-        // Header row: Group names
-        const headerRow = ['Group'];
-        const headerColors = [null]; // No color for header
+        // Header row: Group names with rooms
+        const headerRow = [];
+        const headerColors = [];
         config.groupNames.forEach(name => {
-            headerRow.push(name);
+            const room = config.groupRooms?.[name] || '';
+            const headerText = room ? `${name}\n(${room})` : name;
+            headerRow.push(headerText);
             headerColors.push(null);
         });
         sheetData.push(headerRow);
@@ -382,10 +384,10 @@ async function exportToGoogleSheet() {
             maxEntries = Math.max(maxEntries, entries.length);
         });
 
-        // Data rows: one row per entry position
+        // Data rows: one row per entry position (no row label column)
         for (let i = 0; i < maxEntries; i++) {
-            const row = [`Entry ${i + 1}`];
-            const rowColors = [null]; // Row label has no color
+            const row = [];
+            const rowColors = [];
             
             config.groupNames.forEach(groupName => {
                 const entries = drawState.groups[groupName] || [];
