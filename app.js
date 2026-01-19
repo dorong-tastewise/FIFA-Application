@@ -2891,61 +2891,50 @@ async function drawEntry() {
 
 // ==================== STRUCTURED DRAW FUNCTIONS ====================
 
-// Find an entry in drawState.pots and return its info
-function findEntryInDrawState(entryName) {
+// Find an entry in drawState.pots
+function findEntryInPots(entryName) {
     for (let potIndex = 0; potIndex < drawState.pots.length; potIndex++) {
-        const pot = drawState.pots[potIndex];
-        for (let entryIndex = 0; entryIndex < pot.entries.length; entryIndex++) {
-            if (normalizeName(pot.entries[entryIndex]) === normalizeName(entryName)) {
-                return { entry: pot.entries[entryIndex], potIndex, entryIndex };
-            }
+        const idx = drawState.pots[potIndex].entries.findIndex(e => 
+            normalizeName(e) === normalizeName(entryName)
+        );
+        if (idx !== -1) {
+            return { entry: drawState.pots[potIndex].entries[idx], potIndex };
         }
     }
     return null;
 }
 
-// Place an entry into a group with animation
-async function placeEntryWithAnimation(entry, potIndex, groupName, animationDelay) {
-    // Show animation
+// Place entry with animation
+async function placeEntry(entry, potIndex, groupName, animDelay) {
     await showDrawAnimation(entry);
     
-    const groupIndex = config.groupNames.indexOf(groupName);
-    highlightGroup(groupIndex, true);
+    const gIdx = config.groupNames.indexOf(groupName);
+    highlightGroup(gIdx, true);
     updateStatus(`${entry} → ${groupName}`);
     
     const shortDelay = Math.max(100, (config.animationDuration || 0.8) * 200);
     await sleep(shortDelay);
 
-    // Place in group
     drawState.groups[groupName].push({ entry, potIndex });
-
-    // Remove from pot
+    
     const idx = drawState.pots[potIndex].entries.indexOf(entry);
-    if (idx !== -1) {
-        drawState.pots[potIndex].entries.splice(idx, 1);
-    }
+    if (idx !== -1) drawState.pots[potIndex].entries.splice(idx, 1);
 
-    // Update UI
     renderDrawGroups();
     await sleep(shortDelay);
-    
-    highlightGroup(groupIndex, false);
-    
-    // Delay before next
-    await sleep(animationDelay);
+    highlightGroup(gIdx, false);
+    await sleep(animDelay);
 }
 
-// Check if entry can go in group (respects cannotBeWith)
-function canPlaceInGroup(entryName, groupName) {
-    const groupEntries = drawState.groups[groupName] || [];
-    
+// Check cannotBeWith constraint
+function canBeInGroup(entryName, groupName) {
+    const group = drawState.groups[groupName] || [];
     for (const pair of (CHEAT_CONSTRAINTS.cannotBeWith || [])) {
         if (!Array.isArray(pair) || pair.length !== 2) continue;
-        
-        const normalizedEntry = normalizeName(entryName);
-        if (pair.map(normalizeName).includes(normalizedEntry)) {
-            const otherName = pair.find(p => normalizeName(p) !== normalizedEntry);
-            if (groupEntries.some(e => normalizeName(e.entry) === normalizeName(otherName))) {
+        const norm = normalizeName(entryName);
+        if (pair.map(normalizeName).includes(norm)) {
+            const other = pair.find(p => normalizeName(p) !== norm);
+            if (group.some(e => normalizeName(e.entry) === normalizeName(other))) {
                 return false;
             }
         }
@@ -2953,36 +2942,13 @@ function canPlaceInGroup(entryName, groupName) {
     return true;
 }
 
-// Check if group already has entry from this pot
-function groupHasPotEntry(groupName, potIndex) {
-    const groupEntries = drawState.groups[groupName] || [];
-    return groupEntries.some(e => e.potIndex === potIndex);
-}
-
-// Get best available group for an entry (fewest entries, respects constraints)
-function getBestGroupForEntry(entryName, potIndex) {
-    let bestGroup = null;
-    let minEntries = Infinity;
-    
-    for (const groupName of config.groupNames) {
-        // Skip if group already has entry from this pot
-        if (groupHasPotEntry(groupName, potIndex)) continue;
-        
-        // Skip if cannotBeWith constraint violated
-        if (!canPlaceInGroup(entryName, groupName)) continue;
-        
-        const count = (drawState.groups[groupName] || []).length;
-        if (count < minEntries) {
-            minEntries = count;
-            bestGroup = groupName;
-        }
-    }
-    
-    return bestGroup;
+// Check if group has entry from pot
+function groupHasFromPot(groupName, potIndex) {
+    return (drawState.groups[groupName] || []).some(e => e.potIndex === potIndex);
 }
 
 // Auto draw all (with animation)
-// Order: 1) mustBeInGroup, 2) mustBeWith, 3) pot-by-pot with cannotBeWith
+// Order: 1) mustBeInGroup, 2) mustBeWith, 3) pot-by-pot (one from each pot per group)
 async function autoDrawAll() {
     if (drawState.isDrawing || drawState.drawComplete) return;
 
@@ -2999,190 +2965,147 @@ async function autoDrawAll() {
     drawState.abortRequested = false;
     drawState.isDrawing = true;
 
-    const animationDelay = (config.animationDuration || 0.8) * 1000;
+    const animDelay = (config.animationDuration || 0.8) * 1000;
 
     // ========== PHASE 1: mustBeInGroup ==========
-    if (CHEAT_CONSTRAINTS.enabled && Object.keys(CHEAT_CONSTRAINTS.mustBeInGroup || {}).length > 0) {
-        console.log('=== PHASE 1: MUST BE IN GROUP ===');
+    console.log('=== PHASE 1: MUST BE IN GROUP ===');
+    for (const [entryName, targetGroup] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup || {})) {
+        if (drawState.abortRequested) break;
         
-        for (const [entryName, targetGroup] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup)) {
-            if (drawState.abortRequested) break;
-            
-            const info = findEntryInDrawState(entryName);
-            if (!info) {
-                console.warn(`mustBeInGroup: ${entryName} not found in pots`);
-                continue;
-            }
-            
-            const matchingGroup = config.groupNames.find(g => 
-                normalizeName(g) === normalizeName(targetGroup)
-            );
-            if (!matchingGroup) {
-                console.warn(`mustBeInGroup: group ${targetGroup} not found`);
-                continue;
-            }
-            
-            console.log(`Placing ${info.entry} in ${matchingGroup} (mustBeInGroup)`);
-            await placeEntryWithAnimation(info.entry, info.potIndex, matchingGroup, animationDelay);
-        }
+        const info = findEntryInPots(entryName);
+        if (!info) continue;
+        
+        const group = config.groupNames.find(g => normalizeName(g) === normalizeName(targetGroup));
+        if (!group) continue;
+        
+        console.log(`${info.entry} -> ${group} (mustBeInGroup)`);
+        await placeEntry(info.entry, info.potIndex, group, animDelay);
     }
 
     // ========== PHASE 2: mustBeWith ==========
-    if (!drawState.abortRequested && CHEAT_CONSTRAINTS.enabled && (CHEAT_CONSTRAINTS.mustBeWith || []).length > 0) {
-        console.log('=== PHASE 2: MUST BE WITH ===');
+    console.log('=== PHASE 2: MUST BE WITH ===');
+    for (const pair of (CHEAT_CONSTRAINTS.mustBeWith || [])) {
+        if (drawState.abortRequested) break;
+        if (!Array.isArray(pair) || pair.length !== 2) continue;
         
-        for (const pair of CHEAT_CONSTRAINTS.mustBeWith) {
-            if (drawState.abortRequested) break;
-            if (!Array.isArray(pair) || pair.length !== 2) continue;
-            
-            const [name1, name2] = pair;
-            const info1 = findEntryInDrawState(name1);
-            const info2 = findEntryInDrawState(name2);
-            
-            // Check if either is already placed
-            let placedGroup = null;
-            for (const groupName of config.groupNames) {
-                const entries = drawState.groups[groupName] || [];
-                if (entries.some(e => normalizeName(e.entry) === normalizeName(name1))) {
-                    placedGroup = groupName;
-                    break;
-                }
-                if (entries.some(e => normalizeName(e.entry) === normalizeName(name2))) {
-                    placedGroup = groupName;
-                    break;
-                }
-            }
-            
-            if (placedGroup) {
-                // One is placed, put the other there too
-                if (info1) {
-                    console.log(`Placing ${info1.entry} with partner in ${placedGroup}`);
-                    await placeEntryWithAnimation(info1.entry, info1.potIndex, placedGroup, animationDelay);
-                }
-                if (info2) {
-                    console.log(`Placing ${info2.entry} with partner in ${placedGroup}`);
-                    await placeEntryWithAnimation(info2.entry, info2.potIndex, placedGroup, animationDelay);
-                }
-            } else if (info1 && info2) {
-                // Neither placed - find best group for both
-                let bestGroup = null;
-                let minEntries = Infinity;
-                
-                for (const groupName of config.groupNames) {
-                    if (groupHasPotEntry(groupName, info1.potIndex)) continue;
-                    if (groupHasPotEntry(groupName, info2.potIndex)) continue;
-                    if (!canPlaceInGroup(name1, groupName)) continue;
-                    if (!canPlaceInGroup(name2, groupName)) continue;
-                    
-                    const count = (drawState.groups[groupName] || []).length;
-                    if (count < minEntries) {
-                        minEntries = count;
-                        bestGroup = groupName;
-                    }
-                }
-                
-                if (bestGroup) {
-                    console.log(`Placing ${info1.entry} and ${info2.entry} together in ${bestGroup}`);
-                    await placeEntryWithAnimation(info1.entry, info1.potIndex, bestGroup, animationDelay);
-                    if (!drawState.abortRequested) {
-                        await placeEntryWithAnimation(info2.entry, info2.potIndex, bestGroup, animationDelay);
-                    }
-                } else {
-                    console.warn(`No valid group for mustBeWith pair [${name1}, ${name2}]`);
-                }
-            }
-        }
-    }
-
-    // ========== PHASE 3: Round-robin through pots, always place in smallest group ==========
-    if (!drawState.abortRequested) {
-        console.log('=== PHASE 3: BALANCED DISTRIBUTION ===');
+        const [name1, name2] = pair;
+        const info1 = findEntryInPots(name1);
+        const info2 = findEntryInPots(name2);
         
-        let currentPotIndex = 0;
-        let stuckCount = 0;
-        
-        while (!drawState.abortRequested) {
-            // Count remaining
-            let totalRemaining = 0;
-            drawState.pots.forEach(p => totalRemaining += p.entries.length);
-            
-            if (totalRemaining === 0) {
-                drawState.drawComplete = true;
+        // Find if either is already placed
+        let placedIn = null;
+        for (const g of config.groupNames) {
+            const grp = drawState.groups[g] || [];
+            if (grp.some(e => normalizeName(e.entry) === normalizeName(name1) || 
+                              normalizeName(e.entry) === normalizeName(name2))) {
+                placedIn = g;
                 break;
             }
+        }
+        
+        if (placedIn) {
+            // Place remaining one with partner
+            if (info1) await placeEntry(info1.entry, info1.potIndex, placedIn, animDelay);
+            if (info2 && !drawState.abortRequested) await placeEntry(info2.entry, info2.potIndex, placedIn, animDelay);
+        } else if (info1 && info2) {
+            // Neither placed - find smallest group that works
+            let best = null;
+            let minSize = Infinity;
+            for (const g of config.groupNames) {
+                if (groupHasFromPot(g, info1.potIndex) || groupHasFromPot(g, info2.potIndex)) continue;
+                if (!canBeInGroup(name1, g) || !canBeInGroup(name2, g)) continue;
+                const size = (drawState.groups[g] || []).length;
+                if (size < minSize) { minSize = size; best = g; }
+            }
+            if (best) {
+                console.log(`${info1.entry} + ${info2.entry} -> ${best} (mustBeWith)`);
+                await placeEntry(info1.entry, info1.potIndex, best, animDelay);
+                if (!drawState.abortRequested) await placeEntry(info2.entry, info2.potIndex, best, animDelay);
+            }
+        }
+    }
+
+    // ========== PHASE 3: Pot-by-pot - ensure each group gets one from each pot ==========
+    console.log('=== PHASE 3: POT BY POT ===');
+    
+    // For each pot, fill groups that don't have an entry from that pot yet
+    for (let potIndex = 0; potIndex < drawState.pots.length && !drawState.abortRequested; potIndex++) {
+        const pot = drawState.pots[potIndex];
+        
+        // Find groups that need an entry from this pot
+        const groupsNeedingThisPot = config.groupNames.filter(g => !groupHasFromPot(g, potIndex));
+        
+        // Shuffle groups for randomness
+        groupsNeedingThisPot.sort(() => Math.random() - 0.5);
+        
+        for (const groupName of groupsNeedingThisPot) {
+            if (drawState.abortRequested) break;
+            if (pot.entries.length === 0) break;
             
-            // Find next pot with entries (round-robin)
-            let foundPot = false;
-            for (let i = 0; i < drawState.pots.length; i++) {
-                const idx = (currentPotIndex + i) % drawState.pots.length;
-                if (drawState.pots[idx].entries.length > 0) {
-                    currentPotIndex = idx;
-                    foundPot = true;
+            // Find valid entry for this group (respecting cannotBeWith)
+            const shuffledEntries = [...pot.entries].sort(() => Math.random() - 0.5);
+            let placed = false;
+            
+            for (const entry of shuffledEntries) {
+                if (canBeInGroup(entry, groupName)) {
+                    await placeEntry(entry, potIndex, groupName, animDelay);
+                    placed = true;
                     break;
                 }
             }
             
-            if (!foundPot) break;
-            
-            const currentPot = drawState.pots[currentPotIndex];
-            
-            // Find entry that can go to the SMALLEST valid group
-            let bestEntry = null;
-            let bestGroup = null;
-            let smallestGroupSize = Infinity;
-            
-            for (const entry of currentPot.entries) {
-                for (const groupName of config.groupNames) {
-                    // Skip if group has entry from this pot
-                    if (groupHasPotEntry(groupName, currentPotIndex)) continue;
-                    // Skip if cannotBeWith violated
-                    if (!canPlaceInGroup(entry, groupName)) continue;
-                    
-                    const groupSize = (drawState.groups[groupName] || []).length;
-                    if (groupSize < smallestGroupSize) {
-                        smallestGroupSize = groupSize;
-                        bestEntry = entry;
-                        bestGroup = groupName;
-                    }
-                }
+            // Fallback if no valid entry (ignore cannotBeWith)
+            if (!placed && pot.entries.length > 0) {
+                const entry = pot.entries[0];
+                console.warn(`Fallback (ignoring cannotBeWith): ${entry} -> ${groupName}`);
+                await placeEntry(entry, potIndex, groupName, animDelay);
             }
-            
-            if (bestEntry && bestGroup) {
-                await placeEntryWithAnimation(bestEntry, currentPotIndex, bestGroup, animationDelay);
-                stuckCount = 0;
-            } else {
-                // No valid placement - try fallback
-                const entry = currentPot.entries[0];
-                const fallbackGroup = config.groupNames.find(g => !groupHasPotEntry(g, currentPotIndex));
-                
-                if (fallbackGroup) {
-                    console.warn(`Fallback: ${entry} -> ${fallbackGroup}`);
-                    await placeEntryWithAnimation(entry, currentPotIndex, fallbackGroup, animationDelay);
-                    stuckCount = 0;
-                } else {
-                    // All groups have entry from this pot - place anyway in smallest
-                    let smallest = config.groupNames[0];
-                    let minSize = Infinity;
-                    for (const g of config.groupNames) {
-                        const size = (drawState.groups[g] || []).length;
-                        if (size < minSize) {
-                            minSize = size;
-                            smallest = g;
-                        }
-                    }
-                    console.warn(`Force placement: ${entry} -> ${smallest}`);
-                    await placeEntryWithAnimation(entry, currentPotIndex, smallest, animationDelay);
-                    stuckCount = 0;
-                }
-            }
-            
-            // Move to next pot
-            currentPotIndex = (currentPotIndex + 1) % drawState.pots.length;
         }
     }
 
-    // Cleanup
+    // ========== PHASE 4: Place any remaining entries ==========
+    console.log('=== PHASE 4: REMAINING ENTRIES ===');
+    while (!drawState.abortRequested) {
+        let totalRemaining = 0;
+        drawState.pots.forEach(p => totalRemaining += p.entries.length);
+        if (totalRemaining === 0) break;
+        
+        // Find pot with entries
+        let pot = null, potIndex = -1;
+        for (let i = 0; i < drawState.pots.length; i++) {
+            if (drawState.pots[i].entries.length > 0) {
+                pot = drawState.pots[i];
+                potIndex = i;
+                break;
+            }
+        }
+        if (!pot) break;
+        
+        const entry = pot.entries[0];
+        
+        // Find smallest group (respecting cannotBeWith if possible)
+        let bestGroup = null;
+        let minSize = Infinity;
+        for (const g of config.groupNames) {
+            if (!canBeInGroup(entry, g)) continue;
+            const size = (drawState.groups[g] || []).length;
+            if (size < minSize) { minSize = size; bestGroup = g; }
+        }
+        
+        // Fallback to just smallest group
+        if (!bestGroup) {
+            for (const g of config.groupNames) {
+                const size = (drawState.groups[g] || []).length;
+                if (size < minSize) { minSize = size; bestGroup = g; }
+            }
+        }
+        
+        await placeEntry(entry, potIndex, bestGroup || config.groupNames[0], animDelay);
+    }
+
+    // Done
     drawState.isDrawing = false;
+    drawState.drawComplete = true;
     if (abortBtn) abortBtn.style.display = 'none';
     
     if (drawState.abortRequested) {
@@ -3191,7 +3114,7 @@ async function autoDrawAll() {
         autoDrawBtn.disabled = false;
         if (instantDrawBtn) instantDrawBtn.disabled = false;
         updateStatus('Draw aborted.');
-    } else if (drawState.drawComplete) {
+    } else {
         updateStatus('DRAW COMPLETE!');
         createConfetti();
         if (typeof addVotingButtonToUI === 'function') {
