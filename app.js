@@ -2349,8 +2349,14 @@ function renderDrawGroups() {
 // Get available groups for a specific pot position
 // Now returns all groups since we allow imbalance
 function getAvailableGroups(potIndex) {
-    // Return all groups - we'll distribute entries evenly but allow imbalance
-    return config.groupNames;
+    // Return groups that don't already have an entry from this pot
+    // This enforces the constraint: at most one entry per pot per group
+    return config.groupNames.filter(groupName => {
+        const groupEntries = drawState.groups[groupName] || [];
+        // Check if any entry in this group came from the same pot
+        const hasPotEntry = groupEntries.some(entry => entry.potIndex === potIndex);
+        return !hasPotEntry;
+    });
 }
 
 // ==================== CONSTRAINT CHECKING FUNCTIONS ====================
