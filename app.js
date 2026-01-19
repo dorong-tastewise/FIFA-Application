@@ -1297,7 +1297,8 @@ let drawState = {
     pots: [], // Deep copy of config.pots for draw
     groups: {}, // { groupName: [{entry: string, potIndex: number}, ...] }
     isDrawing: false,
-    drawComplete: false
+    drawComplete: false,
+    abortRequested: false
 };
 
 // ==================== DOM ELEMENTS ====================
@@ -2772,19 +2773,40 @@ async function autoDrawAll() {
     const drawBtn = document.getElementById('drawBtn');
     const autoDrawBtn = document.getElementById('autoDrawBtn');
     const instantDrawBtn = document.getElementById('instantDrawBtn');
+    const abortBtn = document.getElementById('abortBtn');
+    
     drawBtn.disabled = true;
     autoDrawBtn.disabled = true;
     if (instantDrawBtn) instantDrawBtn.disabled = true;
+    if (abortBtn) abortBtn.style.display = 'inline-block';
+    
+    drawState.abortRequested = false;
 
     // Get animation duration from config (convert seconds to milliseconds)
     const animationDelay = (config.animationDuration || 0.8) * 1000;
 
-    while (!drawState.drawComplete) {
+    while (!drawState.drawComplete && !drawState.abortRequested) {
         await drawEntry();
-        if (!drawState.drawComplete) {
+        if (!drawState.drawComplete && !drawState.abortRequested) {
             await sleep(animationDelay);
         }
     }
+    
+    // Hide abort button and re-enable controls
+    if (abortBtn) abortBtn.style.display = 'none';
+    
+    if (drawState.abortRequested) {
+        drawState.abortRequested = false;
+        drawBtn.disabled = false;
+        autoDrawBtn.disabled = false;
+        if (instantDrawBtn) instantDrawBtn.disabled = false;
+        updateStatus('Draw aborted. Click "DRAW NEXT" to continue.');
+    }
+}
+
+// Abort the current auto draw
+function abortDraw() {
+    drawState.abortRequested = true;
 }
 
 // Instant draw all (no animation, one fell swoop)
@@ -3348,6 +3370,7 @@ initConfigWhenReady();
 document.getElementById('drawBtn').addEventListener('click', drawEntry);
 document.getElementById('autoDrawBtn').addEventListener('click', autoDrawAll);
 document.getElementById('instantDrawBtn').addEventListener('click', instantDrawAll);
+document.getElementById('abortBtn').addEventListener('click', abortDraw);
 document.getElementById('exportBtn').addEventListener('click', exportToGoogleSheet);
 document.getElementById('resetBtn').addEventListener('click', resetDraw);
 document.getElementById('reconfigureBtn').addEventListener('click', reconfigure);

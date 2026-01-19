@@ -529,9 +529,37 @@ header h2 {
 }
 
 .groups-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 20px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 15px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+}
+
+.groups-container .group {
+    flex: 1 0 auto;
+    min-width: 120px;
+    max-width: 180px;
+}
+
+/* Abort button */
+.abort-button {
+    background: linear-gradient(145deg, #e74c3c, #c0392b);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Russo One', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+}
+
+.abort-button:hover {
+    background: linear-gradient(145deg, #c0392b, #a93226);
+    transform: scale(1.05);
 }
 
 .group {
@@ -799,7 +827,11 @@ header h2 {
 /* Responsive Design */
 @media (max-width: 1200px) {
     .groups-container {
-        grid-template-columns: repeat(3, 1fr);
+        flex-wrap: nowrap;
+    }
+    
+    .groups-container .group {
+        min-width: 100px;
     }
 }
 
@@ -823,7 +855,11 @@ header h2 {
     }
 
     .groups-container {
-        grid-template-columns: repeat(2, 1fr);
+        flex-wrap: nowrap;
+    }
+    
+    .groups-container .group {
+        min-width: 90px;
     }
 }
 
@@ -843,7 +879,12 @@ header h2 {
     }
 
     .groups-container {
-        grid-template-columns: 1fr;
+        flex-wrap: wrap;
+    }
+    
+    .groups-container .group {
+        min-width: 80px;
+        flex: 1 1 45%;
     }
 
     .controls {
