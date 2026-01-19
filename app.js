@@ -3367,17 +3367,18 @@ function initializeConfig() {
         }
         if (APP_CONFIG.defaults.animationDuration) {
             const animationDurationInput = document.getElementById('animationDuration');
-            if (animationDurationInput && !animationDurationInput.value) {
+            if (animationDurationInput) {
                 animationDurationInput.value = APP_CONFIG.defaults.animationDuration;
             }
+            config.animationDuration = APP_CONFIG.defaults.animationDuration;
         }
     }
     
-    // Load animation duration from localStorage (if not set from config)
+    // Load animation duration from localStorage (always restore to input)
     const savedAnimationDuration = localStorage.getItem('animationDuration');
     if (savedAnimationDuration) {
         const animationDurationInput = document.getElementById('animationDuration');
-        if (animationDurationInput && !animationDurationInput.value) {
+        if (animationDurationInput) {
             animationDurationInput.value = savedAnimationDuration;
         }
         // Also set in config
