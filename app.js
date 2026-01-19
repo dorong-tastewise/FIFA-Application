@@ -1307,7 +1307,7 @@ async function loadPotsFromGoogleDrive(fileUrl, clientId) {
 
 // ==================== CONFIGURATION STATE ====================
 let config = {
-    eventTitle: 'FIFA World Cup',
+    eventTitle: 'Tastewise Hacktivate',
     numGroups: 8,
     numPots: 4,
     groupNames: [],

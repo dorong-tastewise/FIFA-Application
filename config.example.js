@@ -29,7 +29,7 @@ const APP_CONFIG = {
 
     // Default settings (these populate the form when you open the app)
     defaults: {
-        eventTitle: 'FIFA World Cup',  // Default event name
+        eventTitle: 'Tastewise Hacktivate',  // Default event name
         numGroups: 8,                  // Default number of groups
         numPots: 4                     // Default number of pots
     }
