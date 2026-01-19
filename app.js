@@ -2723,8 +2723,11 @@ async function showDrawAnimation(entryName) {
 
     ballText.innerHTML = `<span class="entry-name">${entryName}</span>`;
 
+    // Use animation duration from config (scale overlay to be ~60% of total animation time)
+    const overlayDuration = Math.max(200, (config.animationDuration || 0.8) * 600);
+    
     overlay.classList.add('active');
-    await sleep(1500);
+    await sleep(overlayDuration);
     overlay.classList.remove('active');
 }
 
@@ -2841,7 +2844,10 @@ async function drawEntry() {
 
     updateStatus(`${selectedEntry} → ${selectedGroupName}`);
 
-    await sleep(500);
+    // Scale delays with animation duration (20% of total time each)
+    const shortDelay = Math.max(100, (config.animationDuration || 0.8) * 200);
+
+    await sleep(shortDelay);
 
     // Place entry in group (append to array, allowing imbalance)
     // Store with pot index for color coding
@@ -2859,7 +2865,7 @@ async function drawEntry() {
     // Update UI
     renderDrawGroups();
 
-    await sleep(500);
+    await sleep(shortDelay);
 
     // Remove highlights
     highlightGroup(groupIndex, false);
