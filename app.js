@@ -3094,9 +3094,12 @@ async function autoDrawAll() {
         }
     }
 
-    // ========== PHASE 3: Pot-by-pot with cannotBeWith ==========
+    // ========== PHASE 3: Round-robin through pots, always place in smallest group ==========
     if (!drawState.abortRequested) {
-        console.log('=== PHASE 3: POT BY POT ===');
+        console.log('=== PHASE 3: BALANCED DISTRIBUTION ===');
+        
+        let currentPotIndex = 0;
+        let stuckCount = 0;
         
         while (!drawState.abortRequested) {
             // Count remaining
@@ -3108,40 +3111,73 @@ async function autoDrawAll() {
                 break;
             }
             
-            // Find pot with entries
-            let currentPot = null;
-            let potIndex = -1;
+            // Find next pot with entries (round-robin)
+            let foundPot = false;
             for (let i = 0; i < drawState.pots.length; i++) {
-                if (drawState.pots[i].entries.length > 0) {
-                    currentPot = drawState.pots[i];
-                    potIndex = i;
+                const idx = (currentPotIndex + i) % drawState.pots.length;
+                if (drawState.pots[idx].entries.length > 0) {
+                    currentPotIndex = idx;
+                    foundPot = true;
                     break;
                 }
             }
             
-            if (!currentPot) break;
+            if (!foundPot) break;
             
-            // Find an entry that can be placed
-            let placed = false;
-            const shuffled = [...currentPot.entries].sort(() => Math.random() - 0.5);
+            const currentPot = drawState.pots[currentPotIndex];
             
-            for (const entry of shuffled) {
-                const bestGroup = getBestGroupForEntry(entry, potIndex);
-                if (bestGroup) {
-                    await placeEntryWithAnimation(entry, potIndex, bestGroup, animationDelay);
-                    placed = true;
-                    break;
+            // Find entry that can go to the SMALLEST valid group
+            let bestEntry = null;
+            let bestGroup = null;
+            let smallestGroupSize = Infinity;
+            
+            for (const entry of currentPot.entries) {
+                for (const groupName of config.groupNames) {
+                    // Skip if group has entry from this pot
+                    if (groupHasPotEntry(groupName, currentPotIndex)) continue;
+                    // Skip if cannotBeWith violated
+                    if (!canPlaceInGroup(entry, groupName)) continue;
+                    
+                    const groupSize = (drawState.groups[groupName] || []).length;
+                    if (groupSize < smallestGroupSize) {
+                        smallestGroupSize = groupSize;
+                        bestEntry = entry;
+                        bestGroup = groupName;
+                    }
                 }
             }
             
-            if (!placed) {
-                // Fallback - just place first entry somewhere
+            if (bestEntry && bestGroup) {
+                await placeEntryWithAnimation(bestEntry, currentPotIndex, bestGroup, animationDelay);
+                stuckCount = 0;
+            } else {
+                // No valid placement - try fallback
                 const entry = currentPot.entries[0];
-                const fallbackGroup = config.groupNames.find(g => !groupHasPotEntry(g, potIndex)) 
-                    || config.groupNames[0];
-                console.warn(`Fallback placement: ${entry} -> ${fallbackGroup}`);
-                await placeEntryWithAnimation(entry, potIndex, fallbackGroup, animationDelay);
+                const fallbackGroup = config.groupNames.find(g => !groupHasPotEntry(g, currentPotIndex));
+                
+                if (fallbackGroup) {
+                    console.warn(`Fallback: ${entry} -> ${fallbackGroup}`);
+                    await placeEntryWithAnimation(entry, currentPotIndex, fallbackGroup, animationDelay);
+                    stuckCount = 0;
+                } else {
+                    // All groups have entry from this pot - place anyway in smallest
+                    let smallest = config.groupNames[0];
+                    let minSize = Infinity;
+                    for (const g of config.groupNames) {
+                        const size = (drawState.groups[g] || []).length;
+                        if (size < minSize) {
+                            minSize = size;
+                            smallest = g;
+                        }
+                    }
+                    console.warn(`Force placement: ${entry} -> ${smallest}`);
+                    await placeEntryWithAnimation(entry, currentPotIndex, smallest, animationDelay);
+                    stuckCount = 0;
+                }
             }
+            
+            // Move to next pot
+            currentPotIndex = (currentPotIndex + 1) % drawState.pots.length;
         }
     }
 
