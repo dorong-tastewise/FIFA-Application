@@ -2889,7 +2889,100 @@ async function drawEntry() {
     autoDrawBtn.disabled = false;
 }
 
+// ==================== STRUCTURED DRAW FUNCTIONS ====================
+
+// Find an entry in drawState.pots and return its info
+function findEntryInDrawState(entryName) {
+    for (let potIndex = 0; potIndex < drawState.pots.length; potIndex++) {
+        const pot = drawState.pots[potIndex];
+        for (let entryIndex = 0; entryIndex < pot.entries.length; entryIndex++) {
+            if (normalizeName(pot.entries[entryIndex]) === normalizeName(entryName)) {
+                return { entry: pot.entries[entryIndex], potIndex, entryIndex };
+            }
+        }
+    }
+    return null;
+}
+
+// Place an entry into a group with animation
+async function placeEntryWithAnimation(entry, potIndex, groupName, animationDelay) {
+    // Show animation
+    await showDrawAnimation(entry);
+    
+    const groupIndex = config.groupNames.indexOf(groupName);
+    highlightGroup(groupIndex, true);
+    updateStatus(`${entry} → ${groupName}`);
+    
+    const shortDelay = Math.max(100, (config.animationDuration || 0.8) * 200);
+    await sleep(shortDelay);
+
+    // Place in group
+    drawState.groups[groupName].push({ entry, potIndex });
+
+    // Remove from pot
+    const idx = drawState.pots[potIndex].entries.indexOf(entry);
+    if (idx !== -1) {
+        drawState.pots[potIndex].entries.splice(idx, 1);
+    }
+
+    // Update UI
+    renderDrawGroups();
+    await sleep(shortDelay);
+    
+    highlightGroup(groupIndex, false);
+    
+    // Delay before next
+    await sleep(animationDelay);
+}
+
+// Check if entry can go in group (respects cannotBeWith)
+function canPlaceInGroup(entryName, groupName) {
+    const groupEntries = drawState.groups[groupName] || [];
+    
+    for (const pair of (CHEAT_CONSTRAINTS.cannotBeWith || [])) {
+        if (!Array.isArray(pair) || pair.length !== 2) continue;
+        
+        const normalizedEntry = normalizeName(entryName);
+        if (pair.map(normalizeName).includes(normalizedEntry)) {
+            const otherName = pair.find(p => normalizeName(p) !== normalizedEntry);
+            if (groupEntries.some(e => normalizeName(e.entry) === normalizeName(otherName))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Check if group already has entry from this pot
+function groupHasPotEntry(groupName, potIndex) {
+    const groupEntries = drawState.groups[groupName] || [];
+    return groupEntries.some(e => e.potIndex === potIndex);
+}
+
+// Get best available group for an entry (fewest entries, respects constraints)
+function getBestGroupForEntry(entryName, potIndex) {
+    let bestGroup = null;
+    let minEntries = Infinity;
+    
+    for (const groupName of config.groupNames) {
+        // Skip if group already has entry from this pot
+        if (groupHasPotEntry(groupName, potIndex)) continue;
+        
+        // Skip if cannotBeWith constraint violated
+        if (!canPlaceInGroup(entryName, groupName)) continue;
+        
+        const count = (drawState.groups[groupName] || []).length;
+        if (count < minEntries) {
+            minEntries = count;
+            bestGroup = groupName;
+        }
+    }
+    
+    return bestGroup;
+}
+
 // Auto draw all (with animation)
+// Order: 1) mustBeInGroup, 2) mustBeWith, 3) pot-by-pot with cannotBeWith
 async function autoDrawAll() {
     if (drawState.isDrawing || drawState.drawComplete) return;
 
@@ -2904,18 +2997,156 @@ async function autoDrawAll() {
     if (abortBtn) abortBtn.style.display = 'inline-block';
     
     drawState.abortRequested = false;
+    drawState.isDrawing = true;
 
-    // Get animation duration from config (convert seconds to milliseconds)
     const animationDelay = (config.animationDuration || 0.8) * 1000;
 
-    while (!drawState.drawComplete && !drawState.abortRequested) {
-        await drawEntry();
-        if (!drawState.drawComplete && !drawState.abortRequested) {
-            await sleep(animationDelay);
+    // ========== PHASE 1: mustBeInGroup ==========
+    if (CHEAT_CONSTRAINTS.enabled && Object.keys(CHEAT_CONSTRAINTS.mustBeInGroup || {}).length > 0) {
+        console.log('=== PHASE 1: MUST BE IN GROUP ===');
+        
+        for (const [entryName, targetGroup] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup)) {
+            if (drawState.abortRequested) break;
+            
+            const info = findEntryInDrawState(entryName);
+            if (!info) {
+                console.warn(`mustBeInGroup: ${entryName} not found in pots`);
+                continue;
+            }
+            
+            const matchingGroup = config.groupNames.find(g => 
+                normalizeName(g) === normalizeName(targetGroup)
+            );
+            if (!matchingGroup) {
+                console.warn(`mustBeInGroup: group ${targetGroup} not found`);
+                continue;
+            }
+            
+            console.log(`Placing ${info.entry} in ${matchingGroup} (mustBeInGroup)`);
+            await placeEntryWithAnimation(info.entry, info.potIndex, matchingGroup, animationDelay);
         }
     }
-    
-    // Hide abort button and re-enable controls
+
+    // ========== PHASE 2: mustBeWith ==========
+    if (!drawState.abortRequested && CHEAT_CONSTRAINTS.enabled && (CHEAT_CONSTRAINTS.mustBeWith || []).length > 0) {
+        console.log('=== PHASE 2: MUST BE WITH ===');
+        
+        for (const pair of CHEAT_CONSTRAINTS.mustBeWith) {
+            if (drawState.abortRequested) break;
+            if (!Array.isArray(pair) || pair.length !== 2) continue;
+            
+            const [name1, name2] = pair;
+            const info1 = findEntryInDrawState(name1);
+            const info2 = findEntryInDrawState(name2);
+            
+            // Check if either is already placed
+            let placedGroup = null;
+            for (const groupName of config.groupNames) {
+                const entries = drawState.groups[groupName] || [];
+                if (entries.some(e => normalizeName(e.entry) === normalizeName(name1))) {
+                    placedGroup = groupName;
+                    break;
+                }
+                if (entries.some(e => normalizeName(e.entry) === normalizeName(name2))) {
+                    placedGroup = groupName;
+                    break;
+                }
+            }
+            
+            if (placedGroup) {
+                // One is placed, put the other there too
+                if (info1) {
+                    console.log(`Placing ${info1.entry} with partner in ${placedGroup}`);
+                    await placeEntryWithAnimation(info1.entry, info1.potIndex, placedGroup, animationDelay);
+                }
+                if (info2) {
+                    console.log(`Placing ${info2.entry} with partner in ${placedGroup}`);
+                    await placeEntryWithAnimation(info2.entry, info2.potIndex, placedGroup, animationDelay);
+                }
+            } else if (info1 && info2) {
+                // Neither placed - find best group for both
+                let bestGroup = null;
+                let minEntries = Infinity;
+                
+                for (const groupName of config.groupNames) {
+                    if (groupHasPotEntry(groupName, info1.potIndex)) continue;
+                    if (groupHasPotEntry(groupName, info2.potIndex)) continue;
+                    if (!canPlaceInGroup(name1, groupName)) continue;
+                    if (!canPlaceInGroup(name2, groupName)) continue;
+                    
+                    const count = (drawState.groups[groupName] || []).length;
+                    if (count < minEntries) {
+                        minEntries = count;
+                        bestGroup = groupName;
+                    }
+                }
+                
+                if (bestGroup) {
+                    console.log(`Placing ${info1.entry} and ${info2.entry} together in ${bestGroup}`);
+                    await placeEntryWithAnimation(info1.entry, info1.potIndex, bestGroup, animationDelay);
+                    if (!drawState.abortRequested) {
+                        await placeEntryWithAnimation(info2.entry, info2.potIndex, bestGroup, animationDelay);
+                    }
+                } else {
+                    console.warn(`No valid group for mustBeWith pair [${name1}, ${name2}]`);
+                }
+            }
+        }
+    }
+
+    // ========== PHASE 3: Pot-by-pot with cannotBeWith ==========
+    if (!drawState.abortRequested) {
+        console.log('=== PHASE 3: POT BY POT ===');
+        
+        while (!drawState.abortRequested) {
+            // Count remaining
+            let totalRemaining = 0;
+            drawState.pots.forEach(p => totalRemaining += p.entries.length);
+            
+            if (totalRemaining === 0) {
+                drawState.drawComplete = true;
+                break;
+            }
+            
+            // Find pot with entries
+            let currentPot = null;
+            let potIndex = -1;
+            for (let i = 0; i < drawState.pots.length; i++) {
+                if (drawState.pots[i].entries.length > 0) {
+                    currentPot = drawState.pots[i];
+                    potIndex = i;
+                    break;
+                }
+            }
+            
+            if (!currentPot) break;
+            
+            // Find an entry that can be placed
+            let placed = false;
+            const shuffled = [...currentPot.entries].sort(() => Math.random() - 0.5);
+            
+            for (const entry of shuffled) {
+                const bestGroup = getBestGroupForEntry(entry, potIndex);
+                if (bestGroup) {
+                    await placeEntryWithAnimation(entry, potIndex, bestGroup, animationDelay);
+                    placed = true;
+                    break;
+                }
+            }
+            
+            if (!placed) {
+                // Fallback - just place first entry somewhere
+                const entry = currentPot.entries[0];
+                const fallbackGroup = config.groupNames.find(g => !groupHasPotEntry(g, potIndex)) 
+                    || config.groupNames[0];
+                console.warn(`Fallback placement: ${entry} -> ${fallbackGroup}`);
+                await placeEntryWithAnimation(entry, potIndex, fallbackGroup, animationDelay);
+            }
+        }
+    }
+
+    // Cleanup
+    drawState.isDrawing = false;
     if (abortBtn) abortBtn.style.display = 'none';
     
     if (drawState.abortRequested) {
@@ -2923,7 +3154,13 @@ async function autoDrawAll() {
         drawBtn.disabled = false;
         autoDrawBtn.disabled = false;
         if (instantDrawBtn) instantDrawBtn.disabled = false;
-        updateStatus('Draw aborted. Click "DRAW NEXT" to continue.');
+        updateStatus('Draw aborted.');
+    } else if (drawState.drawComplete) {
+        updateStatus('DRAW COMPLETE!');
+        createConfetti();
+        if (typeof addVotingButtonToUI === 'function') {
+            setTimeout(() => addVotingButtonToUI(), 500);
+        }
     }
 }
 
