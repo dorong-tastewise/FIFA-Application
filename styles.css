@@ -397,9 +397,10 @@ body {
 
 /* ==================== DRAW SCREEN ==================== */
 .container {
-    max-width: 1400px;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 20px;
+    width: 95%;
 }
 
 /* Header Styles */
@@ -449,8 +450,8 @@ header h2 {
 
 /* Pots Section */
 .pots-section {
-    flex: 1;
-    max-width: 400px;
+    flex: 0 0 auto;
+    width: 300px;
 }
 
 .pots-section h3,
@@ -525,7 +526,8 @@ header h2 {
 
 /* Groups Section */
 .groups-section {
-    flex: 2;
+    flex: 3;
+    min-width: 0;
 }
 
 .groups-container {
@@ -534,6 +536,7 @@ header h2 {
     gap: 15px;
     overflow-x: auto;
     padding-bottom: 10px;
+    width: 100%;
 }
 
 .groups-container .group {
@@ -841,7 +844,7 @@ header h2 {
     }
 
     .pots-section {
-        max-width: 100%;
+        width: 100%;
     }
 
     .pots-container {
