@@ -129,6 +129,13 @@ async function writeToGoogleSheetOAuth(accessToken, spreadsheetId, sheetName, da
             }
         }
 
+        // Clear the sheet first for clean overwrite
+        const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A:ZZ:clear`;
+        await fetch(clearUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
         // Write the values
         const range = `${sheetName}!A1`;
         const valuesUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW`;
@@ -271,31 +278,59 @@ async function exportToGoogleSheet() {
         }
     }
 
-    // Prompt for spreadsheet URL or create new
-    const spreadsheetUrl = prompt('Enter Google Sheets URL to export to (or leave blank to create new):');
+    // Get source spreadsheet info to find parent folder
+    const sourceUrl = document.getElementById('googleDriveFileUrl')?.value.trim() || 
+                     document.getElementById('googleSheetUrl')?.value.trim() || '';
+    const sourceId = sourceUrl ? extractSpreadsheetId(sourceUrl) : null;
     
-    let spreadsheetId;
-    if (spreadsheetUrl && spreadsheetUrl.trim()) {
-        spreadsheetId = extractSpreadsheetId(spreadsheetUrl.trim());
-        if (!spreadsheetId) {
-            updateStatus('Invalid Google Sheets URL');
-            return;
+    let parentFolderId = null;
+    let spreadsheetId = null;
+    const exportFileName = `${config.eventTitle} - Draw Results`;
+    
+    try {
+        updateStatus('Finding source folder...');
+        
+        // Get parent folder of source spreadsheet
+        if (sourceId) {
+            const parentResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${sourceId}?fields=parents`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (parentResponse.ok) {
+                const parentData = await parentResponse.json();
+                parentFolderId = parentData.parents?.[0] || null;
+                console.log('Source folder ID:', parentFolderId);
+            }
         }
-    } else {
-        // Create new spreadsheet using OAuth2
-        try {
+        
+        // Search for existing export file in the folder
+        if (parentFolderId) {
+            const searchQuery = `name='${exportFileName}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+            const searchResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=files(id,name)`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (searchResponse.ok) {
+                const searchData = await searchResponse.json();
+                if (searchData.files && searchData.files.length > 0) {
+                    spreadsheetId = searchData.files[0].id;
+                    console.log('Found existing export file:', spreadsheetId);
+                    updateStatus('Updating existing export file...');
+                }
+            }
+        }
+        
+        // Create new spreadsheet if not found
+        if (!spreadsheetId) {
             updateStatus('Creating new spreadsheet...');
-            const createUrl = `https://sheets.googleapis.com/v4/spreadsheets`;
-            const createResponse = await fetch(createUrl, {
+            const createResponse = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${accessToken}`
                 },
                 body: JSON.stringify({
-                    properties: {
-                        title: `${config.eventTitle} - Draw Results`
-                    }
+                    properties: { title: exportFileName }
                 })
             });
 
@@ -306,11 +341,21 @@ async function exportToGoogleSheet() {
 
             const createData = await createResponse.json();
             spreadsheetId = createData.spreadsheetId;
-            updateStatus(`Created new spreadsheet: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
-        } catch (error) {
-            updateStatus(`Error creating spreadsheet: ${error.message}`);
-            return;
+            
+            // Move to source folder if we have one
+            if (parentFolderId) {
+                await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${parentFolderId}&removeParents=root`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                console.log('Moved export file to source folder');
+            }
+            
+            updateStatus(`Created: ${exportFileName}`);
         }
+    } catch (error) {
+        updateStatus(`Error setting up export: ${error.message}`);
+        return;
     }
 
     try {
