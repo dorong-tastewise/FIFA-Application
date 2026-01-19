@@ -2558,63 +2558,120 @@ function getValidGroupsForEntry(entryName, potIndex) {
         return availableGroups;
     }
 
-    const validGroups = availableGroups.filter(groupName => isValidPlacement(entryName, groupName));
-    
-    // If no valid groups, check if we can force placement due to constraints
-    if (validGroups.length === 0 && CHEAT_CONSTRAINTS.enabled) {
-        // First check mustBeInGroup constraint (from MustBeInTopic sheet)
-        const normalizedEntryName = normalizeName(entryName);
-        let forcedGroup = CHEAT_CONSTRAINTS.mustBeInGroup[entryName];
-        
-        // If not found, try case-insensitive lookup
-        if (!forcedGroup) {
-            for (const [key, value] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup)) {
-                if (normalizeName(key) === normalizedEntryName) {
-                    forcedGroup = value;
-                    break;
-                }
-            }
-        }
-        
-        if (forcedGroup) {
-            // Find the matching group (case-insensitive)
-            const matchingGroup = config.groupNames.find(gName => 
-                normalizeName(gName) === normalizeName(forcedGroup)
+    // First, check if this entry has a mustBeWith constraint with someone already placed
+    const cluster = getMustBeWithCluster(entryName);
+    if (cluster) {
+        // Find where any cluster member is already placed
+        for (const gName of config.groupNames) {
+            const entries = getEntriesInGroup(gName);
+            const clusterMemberInGroup = Array.from(cluster).some(clusterEntry => 
+                entries.some(e => normalizeName(e) === clusterEntry)
             );
-            if (matchingGroup) {
-                console.log(`Forcing ${entryName} to ${matchingGroup} due to MustBeInTopic constraint`);
-                return [matchingGroup]; // Force this group
-            }
-        }
-        
-        // Then check mustBeWith constraint (cluster)
-        const cluster = getMustBeWithCluster(entryName);
-        if (cluster) {
-            // Find where any cluster member is placed
-            for (const gName of config.groupNames) {
-                const entries = getEntriesInGroup(gName);
-                const clusterMemberInGroup = Array.from(cluster).some(clusterEntry => 
-                    entries.some(e => normalizeName(e) === clusterEntry)
-                );
-                if (clusterMemberInGroup) {
-                    // Cluster member is here - we MUST go here too (ignore other constraints if necessary)
+            if (clusterMemberInGroup) {
+                // Cluster member is here - check if this group is still available for this pot
+                if (availableGroups.includes(gName)) {
                     const clusterMembers = Array.from(cluster).join(', ');
-                    console.log(`Forcing ${entryName} to ${gName} to be with cluster [${clusterMembers}]`);
-                    return [gName]; // Force this group
+                    console.log(`${entryName} must be with cluster [${clusterMembers}] in ${gName}`);
+                    return [gName]; // This is the only valid group
+                } else {
+                    // Group already has entry from this pot - constraint conflict!
+                    console.warn(`CONSTRAINT CONFLICT: ${entryName} must be with cluster but ${gName} already has entry from pot ${potIndex}`);
+                    // Return empty - this entry cannot be placed validly
+                    return [];
                 }
             }
         }
     }
+
+    // Check mustBeInGroup constraint (from MustBeInTopic sheet)
+    const normalizedEntryName = normalizeName(entryName);
+    let forcedGroup = CHEAT_CONSTRAINTS.mustBeInGroup[entryName];
+    
+    // If not found, try case-insensitive lookup
+    if (!forcedGroup) {
+        for (const [key, value] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup)) {
+            if (normalizeName(key) === normalizedEntryName) {
+                forcedGroup = value;
+                break;
+            }
+        }
+    }
+    
+    if (forcedGroup) {
+        // Find the matching group (case-insensitive)
+        const matchingGroup = config.groupNames.find(gName => 
+            normalizeName(gName) === normalizeName(forcedGroup)
+        );
+        if (matchingGroup && availableGroups.includes(matchingGroup)) {
+            console.log(`${entryName} must be in ${matchingGroup} due to MustBeInTopic constraint`);
+            return [matchingGroup];
+        } else if (matchingGroup) {
+            console.warn(`CONSTRAINT CONFLICT: ${entryName} must be in ${matchingGroup} but it already has entry from pot ${potIndex}`);
+            return [];
+        }
+    }
+
+    // Apply other constraints (cannotBeWith, cannotBeInGroup) to available groups
+    const validGroups = availableGroups.filter(groupName => isValidPlacement(entryName, groupName));
     
     return validGroups;
 }
 
 // Find an entry from the pot that has valid placements (for smart selection)
 function findDrawableEntry(potEntries, potIndex) {
-    // Shuffle entries to maintain randomness appearance
-    const shuffled = [...potEntries].sort(() => Math.random() - 0.5);
-
-    for (const entry of shuffled) {
+    // Prioritize entries that MUST be placed with someone already placed
+    // This ensures mustBeWith constraints are satisfied early
+    const entriesWithMustBeWith = [];
+    const entriesWithMustBeInGroup = [];
+    const otherEntries = [];
+    
+    for (const entry of potEntries) {
+        const cluster = getMustBeWithCluster(entry);
+        if (cluster) {
+            // Check if any cluster member is already placed
+            let clusterMemberPlaced = false;
+            for (const gName of config.groupNames) {
+                const entries = getEntriesInGroup(gName);
+                if (Array.from(cluster).some(clusterEntry => 
+                    entries.some(e => normalizeName(e) === clusterEntry)
+                )) {
+                    clusterMemberPlaced = true;
+                    break;
+                }
+            }
+            if (clusterMemberPlaced) {
+                entriesWithMustBeWith.push(entry);
+                continue;
+            }
+        }
+        
+        // Check mustBeInGroup
+        const normalizedName = normalizeName(entry);
+        let hasMustBeInGroup = CHEAT_CONSTRAINTS.mustBeInGroup[entry];
+        if (!hasMustBeInGroup) {
+            for (const [key, value] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup)) {
+                if (normalizeName(key) === normalizedName) {
+                    hasMustBeInGroup = true;
+                    break;
+                }
+            }
+        }
+        if (hasMustBeInGroup) {
+            entriesWithMustBeInGroup.push(entry);
+        } else {
+            otherEntries.push(entry);
+        }
+    }
+    
+    // Shuffle each category
+    const shuffleMustBeWith = entriesWithMustBeWith.sort(() => Math.random() - 0.5);
+    const shuffleMustBeInGroup = entriesWithMustBeInGroup.sort(() => Math.random() - 0.5);
+    const shuffleOther = otherEntries.sort(() => Math.random() - 0.5);
+    
+    // Try entries in priority order: mustBeWith first, then mustBeInGroup, then others
+    const orderedEntries = [...shuffleMustBeWith, ...shuffleMustBeInGroup, ...shuffleOther];
+    
+    for (const entry of orderedEntries) {
         const validGroups = getValidGroupsForEntry(entry, potIndex);
         if (validGroups.length > 0) {
             return { entry, validGroups };
@@ -2622,10 +2679,17 @@ function findDrawableEntry(potEntries, potIndex) {
     }
 
     // No valid entry found - constraints might be impossible
-    // Fall back to random selection (ignore constraints)
-    console.warn('CHEAT WARNING: Could not satisfy all constraints. Falling back to random.');
+    // Fall back to random selection from available groups only
+    console.warn('CHEAT WARNING: Could not satisfy all constraints. Falling back to available groups.');
     const randomEntry = potEntries[Math.floor(Math.random() * potEntries.length)];
-    return { entry: randomEntry, validGroups: getAvailableGroups(potIndex) };
+    const availableGroups = getAvailableGroups(potIndex);
+    if (availableGroups.length > 0) {
+        return { entry: randomEntry, validGroups: availableGroups };
+    }
+    
+    // Absolute fallback - no groups available (all have entry from this pot)
+    console.error('CRITICAL: No available groups for pot', potIndex);
+    return { entry: randomEntry, validGroups: config.groupNames };
 }
 
 // Mark entry as drawn
