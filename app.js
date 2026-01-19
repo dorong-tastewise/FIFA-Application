@@ -3130,8 +3130,16 @@ function abortDraw() {
 
 // Instant draw all (no animation, one fell swoop)
 // Can be used to continue a draw that's already been started
+// Place entry without animation (for instant draw)
+function placeEntryInstant(entry, potIndex, groupName) {
+    drawState.groups[groupName].push({ entry, potIndex });
+    const idx = drawState.pots[potIndex].entries.indexOf(entry);
+    if (idx !== -1) drawState.pots[potIndex].entries.splice(idx, 1);
+}
+
+// Instant draw - SAME LOGIC as autoDrawAll, just no animations
 function instantDrawAll() {
-    if (drawState.isDrawing) return; // Don't allow if already drawing
+    if (drawState.isDrawing) return;
     if (drawState.drawComplete) {
         updateStatus('Draw already complete!');
         return;
@@ -3143,125 +3151,120 @@ function instantDrawAll() {
     drawBtn.disabled = true;
     autoDrawBtn.disabled = true;
     if (instantDrawBtn) instantDrawBtn.disabled = true;
-
     drawState.isDrawing = true;
 
-    // Draw all entries instantly - continue until ALL entries from ALL pots are distributed
-    let iterations = 0;
-    const maxIterations = 1000; // Safety limit
-    
-    while (iterations < maxIterations) {
-        // Count total remaining entries across ALL pots
-        let totalRemaining = 0;
-        drawState.pots.forEach(pot => {
-            totalRemaining += pot.entries.length;
-        });
-        
-        // If no entries remain, we're done
-        if (totalRemaining === 0) {
-            drawState.drawComplete = true;
-            break;
-        }
-        
-        // Find ANY pot with remaining entries
-        let currentPot = null;
-        let potIndex = -1;
+    // ========== PHASE 1: mustBeInGroup (SAME AS AUTO) ==========
+    for (const [entryName, targetGroup] of Object.entries(CHEAT_CONSTRAINTS.mustBeInGroup || {})) {
+        const info = findEntryInPots(entryName);
+        if (!info) continue;
+        const group = config.groupNames.find(g => normalizeName(g) === normalizeName(targetGroup));
+        if (!group) continue;
+        placeEntryInstant(info.entry, info.potIndex, group);
+    }
 
-        for (let i = 0; i < drawState.pots.length; i++) {
-            if (drawState.pots[i].entries.length > 0) {
-                currentPot = drawState.pots[i];
-                potIndex = i;
+    // ========== PHASE 2: mustBeWith (SAME AS AUTO) ==========
+    for (const pair of (CHEAT_CONSTRAINTS.mustBeWith || [])) {
+        if (!Array.isArray(pair) || pair.length !== 2) continue;
+        const [name1, name2] = pair;
+        const info1 = findEntryInPots(name1);
+        const info2 = findEntryInPots(name2);
+        
+        let placedIn = null;
+        for (const g of config.groupNames) {
+            const grp = drawState.groups[g] || [];
+            if (grp.some(e => normalizeName(e.entry) === normalizeName(name1) || 
+                              normalizeName(e.entry) === normalizeName(name2))) {
+                placedIn = g;
                 break;
             }
         }
-
-        // If we can't find a pot but there are still entries, something is wrong
-        if (!currentPot || currentPot.entries.length === 0) {
-            console.error(`Error: ${totalRemaining} entries remaining but no pot found!`);
-            break;
-        }
-
-        // Get entry and valid groups
-        const { entry: selectedEntry, validGroups } = findDrawableEntry(currentPot.entries, potIndex);
         
-        // Distribute evenly - find group with fewest entries
-        let selectedGroupName;
-        if (validGroups.length > 0) {
-            let minEntries = Infinity;
-            const groupsWithMinEntries = [];
+        if (placedIn) {
+            if (info1) placeEntryInstant(info1.entry, info1.potIndex, placedIn);
+            if (info2) placeEntryInstant(info2.entry, info2.potIndex, placedIn);
+        } else if (info1 && info2) {
+            let best = null, minSize = Infinity;
+            for (const g of config.groupNames) {
+                if (groupHasFromPot(g, info1.potIndex) || groupHasFromPot(g, info2.potIndex)) continue;
+                if (!canBeInGroup(name1, g) || !canBeInGroup(name2, g)) continue;
+                const size = (drawState.groups[g] || []).length;
+                if (size < minSize) { minSize = size; best = g; }
+            }
+            if (best) {
+                placeEntryInstant(info1.entry, info1.potIndex, best);
+                placeEntryInstant(info2.entry, info2.potIndex, best);
+            }
+        }
+    }
+
+    // ========== PHASE 3: Pot-by-pot (SAME AS AUTO) ==========
+    for (let potIndex = 0; potIndex < drawState.pots.length; potIndex++) {
+        const pot = drawState.pots[potIndex];
+        const groupsNeedingThisPot = config.groupNames.filter(g => !groupHasFromPot(g, potIndex));
+        groupsNeedingThisPot.sort(() => Math.random() - 0.5);
+        
+        for (const groupName of groupsNeedingThisPot) {
+            if (pot.entries.length === 0) break;
+            const shuffledEntries = [...pot.entries].sort(() => Math.random() - 0.5);
+            let placed = false;
             
-            validGroups.forEach(groupName => {
-                const entryCount = drawState.groups[groupName].length;
-                if (entryCount < minEntries) {
-                    minEntries = entryCount;
-                    groupsWithMinEntries.length = 0;
-                    groupsWithMinEntries.push(groupName);
-                } else if (entryCount === minEntries) {
-                    groupsWithMinEntries.push(groupName);
+            for (const entry of shuffledEntries) {
+                if (canBeInGroup(entry, groupName)) {
+                    placeEntryInstant(entry, potIndex, groupName);
+                    placed = true;
+                    break;
                 }
-            });
+            }
             
-            // Randomly select from groups with minimum entries
-            const randomGroupIndex = Math.floor(Math.random() * groupsWithMinEntries.length);
-            selectedGroupName = groupsWithMinEntries[randomGroupIndex];
-        } else {
-            // Fallback - just pick any group
-            selectedGroupName = config.groupNames[Math.floor(Math.random() * config.groupNames.length)];
+            if (!placed && pot.entries.length > 0) {
+                placeEntryInstant(pot.entries[0], potIndex, groupName);
+            }
         }
+    }
 
-        // Place entry in group (append to array, allowing imbalance)
-        // Store with pot index for color coding
-        drawState.groups[selectedGroupName].push({entry: selectedEntry, potIndex: potIndex});
-
-        // Remove entry from pot
-        const entryIndex = currentPot.entries.indexOf(selectedEntry);
-        if (entryIndex !== -1) {
-            drawState.pots[potIndex].entries.splice(entryIndex, 1);
-        }
-
-        // Mark as drawn
-        const originalEntryIndex = config.pots[potIndex].entries.indexOf(selectedEntry);
-        if (originalEntryIndex !== -1) {
-            markEntryAsDrawn(potIndex, originalEntryIndex);
-        }
+    // ========== PHASE 4: Remaining (SAME AS AUTO) ==========
+    while (true) {
+        let totalRemaining = 0;
+        drawState.pots.forEach(p => totalRemaining += p.entries.length);
+        if (totalRemaining === 0) break;
         
-        iterations++;
-    }
-    
-    // Final check
-    let finalTotal = 0;
-    drawState.pots.forEach(pot => {
-        finalTotal += pot.entries.length;
-    });
-    
-    if (finalTotal > 0) {
-        console.error(`Warning: Draw stopped with ${finalTotal} entries still remaining after ${iterations} iterations`);
+        let pot = null, potIndex = -1;
+        for (let i = 0; i < drawState.pots.length; i++) {
+            if (drawState.pots[i].entries.length > 0) {
+                pot = drawState.pots[i]; potIndex = i; break;
+            }
+        }
+        if (!pot) break;
+        
+        const entry = pot.entries[0];
+        let bestGroup = null, minSize = Infinity;
+        for (const g of config.groupNames) {
+            if (!canBeInGroup(entry, g)) continue;
+            const size = (drawState.groups[g] || []).length;
+            if (size < minSize) { minSize = size; bestGroup = g; }
+        }
+        if (!bestGroup) {
+            for (const g of config.groupNames) {
+                const size = (drawState.groups[g] || []).length;
+                if (size < minSize) { minSize = size; bestGroup = g; }
+            }
+        }
+        placeEntryInstant(entry, potIndex, bestGroup || config.groupNames[0]);
     }
 
-    // Update UI once at the end
+    // Update UI
     renderDrawGroups();
     renderDrawPots();
-
-    // Check if draw is complete
-    let totalRemaining = 0;
-    drawState.pots.forEach(pot => {
-        totalRemaining += pot.entries.length;
-    });
-
-    if (totalRemaining === 0) {
-        drawState.drawComplete = true;
-        updateStatus('DRAW COMPLETE!');
-        createConfetti();
-    } else {
-        updateStatus('DRAW COMPLETE!');
-    }
-
+    
     drawState.isDrawing = false;
+    drawState.drawComplete = true;
+    updateStatus('DRAW COMPLETE!');
+    createConfetti();
+    
     drawBtn.disabled = false;
     autoDrawBtn.disabled = false;
     if (instantDrawBtn) instantDrawBtn.disabled = false;
     
-    // Add voting button when draw completes
     if (typeof addVotingButtonToUI === 'function') {
         setTimeout(() => addVotingButtonToUI(), 500);
     }
