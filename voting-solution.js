@@ -650,6 +650,19 @@ function generateVotingForms(drawState, config, participantEmails = {}) {
         isJudgesForm: true
     };
 
+    // Add RoW (Rest of World) form - includes ALL projects (no exclusions), votes 1-5 like Judges
+    forms['form_RoW'] = {
+        formId: 'form_RoW',
+        teamName: 'RoW',
+        excludedTeam: null, // No exclusions for RoW
+        votingOptions: allProjects,
+        assignedParticipants: ['RoW'],
+        assignedEmails: [],
+        formTitle: 'RoW Voting',
+        formDescription: '',
+        isRoWForm: true
+    };
+
     return {
         teams: teams,
         forms: forms,
@@ -1099,6 +1112,12 @@ async function createResultsSpreadsheet(accessToken, votingData, createdForms) {
                 },
                 {
                     properties: {
+                        title: 'RoW Votes',
+                        gridProperties: { rowCount: 1000, columnCount: 20 }
+                    }
+                },
+                {
+                    properties: {
                         title: 'Judges Votes',
                         gridProperties: { rowCount: 1000, columnCount: 20 }
                     }
@@ -1106,6 +1125,12 @@ async function createResultsSpreadsheet(accessToken, votingData, createdForms) {
                 {
                     properties: {
                         title: 'Participants Weighted Results',
+                        gridProperties: { rowCount: 1000, columnCount: 20 }
+                    }
+                },
+                {
+                    properties: {
+                        title: 'RoW Weighted Results',
                         gridProperties: { rowCount: 1000, columnCount: 20 }
                     }
                 },
@@ -1136,15 +1161,17 @@ async function createResultsSpreadsheet(accessToken, votingData, createdForms) {
     // Set up headers
     const votesHeaders = [['Timestamp', 'Email', 'Form', 'Category', 'Project', 'Rank', 'Points']];
     const weightedHeaders = [['Project', 'Business Impact (40%)', 'Production Readiness (40%)', 'Presentation (20%)', 'Total Score']];
-    const finalHeaders = [['Project', 'Participants (50%)', 'Judges (50%, scaled 0.8)', 'Final Score']];
+    const finalHeaders = [['Project', 'Participants (40%)', 'RoW (20%, scaled 0.8)', 'Judges (40%, scaled 0.8)', 'Final Score']];
     
     // Write headers to all sheets
     const headerWrites = [
         { range: 'Participants Votes!A1:G1', values: votesHeaders },
+        { range: 'RoW Votes!A1:G1', values: votesHeaders },
         { range: 'Judges Votes!A1:G1', values: votesHeaders },
         { range: 'Participants Weighted Results!A1:E1', values: weightedHeaders },
+        { range: 'RoW Weighted Results!A1:E1', values: weightedHeaders },
         { range: 'Judges Weighted Results!A1:E1', values: weightedHeaders },
-        { range: 'Final Weighted Results!A1:D1', values: finalHeaders }
+        { range: 'Final Weighted Results!A1:E1', values: finalHeaders }
     ];
     
     for (const hw of headerWrites) {
@@ -1368,11 +1395,15 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         }
     }
     
-    // Separate participant and judge responses
-    const participantResponses = allResponses.filter(r => r.form !== 'Judges Voting' && !r.form.toLowerCase().includes('judge'));
+    // Separate participant, RoW, and judge responses
     const judgeResponses = allResponses.filter(r => r.form === 'Judges Voting' || r.form.toLowerCase().includes('judge'));
+    const rowResponses = allResponses.filter(r => r.form === 'RoW Voting' || r.form.toLowerCase().includes('row'));
+    const participantResponses = allResponses.filter(r => 
+        r.form !== 'Judges Voting' && !r.form.toLowerCase().includes('judge') &&
+        r.form !== 'RoW Voting' && !r.form.toLowerCase().includes('row')
+    );
     
-    console.log(`Participant responses: ${participantResponses.length}, Judge responses: ${judgeResponses.length}`);
+    console.log(`Participant responses: ${participantResponses.length}, RoW responses: ${rowResponses.length}, Judge responses: ${judgeResponses.length}`);
     
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
     
@@ -1380,8 +1411,10 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     console.log('Clearing existing data from sheets...');
     const sheetsToClear = [
         'Participants Votes!A2:Z',
+        'RoW Votes!A2:Z',
         'Judges Votes!A2:Z',
         'Participants Weighted Results!A2:Z',
+        'RoW Weighted Results!A2:Z',
         'Judges Weighted Results!A2:Z',
         'Final Weighted Results!A2:Z'
     ];
@@ -1405,6 +1438,17 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} participant votes`);
     }
     
+    // Write RoW votes
+    if (rowResponses.length > 0) {
+        const data = rowResponses.map(r => [r.timestamp, r.email, r.form, r.category, r.project, r.rank, r.points]);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Votes!A2:G')}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: data })
+        });
+        console.log(`✓ Wrote ${data.length} RoW votes`);
+    }
+    
     // Write judge votes
     if (judgeResponses.length > 0) {
         const data = judgeResponses.map(r => [r.timestamp, r.email, r.form, r.category, r.project, r.rank, r.points]);
@@ -1416,7 +1460,7 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} judge votes`);
     }
     
-    // Calculate weighted scores separately for participants and judges
+    // Calculate weighted scores separately for participants, RoW, and judges
     const weights = { impact: 0.4, readiness: 0.4, presentation: 0.2 };
     
     function calcWeighted(responses) {
@@ -1441,6 +1485,7 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     }
     
     const participantWeighted = calcWeighted(participantResponses);
+    const rowWeighted = calcWeighted(rowResponses);
     const judgesWeighted = calcWeighted(judgeResponses);
     
     // Write Participants Weighted Results
@@ -1454,6 +1499,17 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} participant weighted results`);
     }
     
+    // Write RoW Weighted Results
+    if (rowWeighted.length > 0) {
+        const data = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Weighted Results!A2:E')}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: data })
+        });
+        console.log(`✓ Wrote ${data.length} RoW weighted results`);
+    }
+    
     // Write Judges Weighted Results
     if (judgesWeighted.length > 0) {
         const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
@@ -1465,23 +1521,38 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} judges weighted results`);
     }
     
-    // Final Weighted Results (50% participants + 50% judges, judges scaled by 0.8)
-    const judgesScaleFactor = 4 / 5;
-    const allProjects = new Set([...participantWeighted.map(r => r.project), ...judgesWeighted.map(r => r.project)]);
+    // Final Weighted Results: Participants 40%, RoW 20%, Judges 40%
+    // RoW and Judges score 1-5, Participants score 1-4, so scale RoW and Judges by 4/5 = 0.8
+    const scaleFactor = 4 / 5; // = 0.8
+    const allProjects = new Set([
+        ...participantWeighted.map(r => r.project), 
+        ...rowWeighted.map(r => r.project),
+        ...judgesWeighted.map(r => r.project)
+    ]);
     const finalResults = [];
     
     for (const project of allProjects) {
         const pScore = participantWeighted.find(r => r.project === project)?.total || 0;
+        const rScore = rowWeighted.find(r => r.project === project)?.total || 0;
         const jScore = judgesWeighted.find(r => r.project === project)?.total || 0;
-        const jScoreScaled = jScore * judgesScaleFactor;
-        const finalScore = (pScore * 0.5) + (jScoreScaled * 0.5);
-        finalResults.push([project, (pScore * 0.5).toFixed(2), (jScoreScaled * 0.5).toFixed(2), finalScore.toFixed(2)]);
+        
+        // Scale RoW and Judges (they use 1-5 scale, participants use 1-4)
+        const rScoreScaled = rScore * scaleFactor;
+        const jScoreScaled = jScore * scaleFactor;
+        
+        // Weights: Participants 40%, RoW 20%, Judges 40%
+        const pContrib = pScore * 0.4;
+        const rContrib = rScoreScaled * 0.2;
+        const jContrib = jScoreScaled * 0.4;
+        const finalScore = pContrib + rContrib + jContrib;
+        
+        finalResults.push([project, pContrib.toFixed(2), rContrib.toFixed(2), jContrib.toFixed(2), finalScore.toFixed(2)]);
     }
     
-    finalResults.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]));
+    finalResults.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
     
     if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:D')}?valueInputOption=RAW`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:E')}?valueInputOption=RAW`, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: finalResults })
@@ -1493,6 +1564,7 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         totalResponses: allResponses.length,
         projects: allProjects.size,
         participantVotes: participantResponses.length,
+        rowVotes: rowResponses.length,
         judgeVotes: judgeResponses.length
     };
 }
@@ -1739,8 +1811,10 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
     console.log('=== AGGREGATING FROM FORM RESPONSE SPREADSHEETS ===');
     
     const participantVotes = [];
+    const rowVotes = [];
     const judgesVotes = [];
     const participantScores = {};
+    const rowScores = {};
     const judgesScores = {};
     const categories = ['Business Impact', 'Production Readiness', 'Presentation'];
     const weights = { impact: 0.4, readiness: 0.4, presentation: 0.2 };
@@ -1755,8 +1829,9 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         }
         
         const isJudges = formData.isJudgesForm || formData.teamName === 'Judges';
-        const targetVotes = isJudges ? judgesVotes : participantVotes;
-        const targetScores = isJudges ? judgesScores : participantScores;
+        const isRoW = formData.isRoWForm || formData.teamName === 'RoW';
+        const targetVotes = isJudges ? judgesVotes : isRoW ? rowVotes : participantVotes;
+        const targetScores = isJudges ? judgesScores : isRoW ? rowScores : participantScores;
         const votingOptions = formData.votingOptions || [];
         const numProjects = votingOptions.length;
         
@@ -1824,7 +1899,7 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         }
     }
     
-    console.log(`Aggregated ${participantVotes.length} participant votes, ${judgesVotes.length} judges votes`);
+    console.log(`Aggregated ${participantVotes.length} participant votes, ${rowVotes.length} RoW votes, ${judgesVotes.length} judges votes`);
     
     // Calculate weighted results
     function calcWeightedResults(scores) {
@@ -1841,6 +1916,7 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
     }
     
     const participantWeighted = calcWeightedResults(participantScores);
+    const rowWeighted = calcWeightedResults(rowScores);
     const judgesWeighted = calcWeightedResults(judgesScores);
     
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
@@ -1850,6 +1926,14 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: participantVotes })
+        });
+    }
+    
+    // Write RoW Votes
+    if (rowVotes.length > 0) {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: rowVotes })
         });
     }
     
@@ -1870,6 +1954,14 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         });
     }
     
+    if (rowWeighted.length > 0) {
+        const data = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: data })
+        });
+    }
+    
     if (judgesWeighted.length > 0) {
         const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
@@ -1878,30 +1970,43 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         });
     }
     
-    // Final Weighted Results
-    const judgesScaleFactor = 4 / 5;
-    const allProjects = new Set([...participantWeighted.map(r => r.project), ...judgesWeighted.map(r => r.project)]);
+    // Final Weighted Results: Participants 40%, RoW 20%, Judges 40%
+    // RoW and Judges use 1-5 scale, Participants use 1-4, scale by 4/5 = 0.8
+    const scaleFactor = 4 / 5;
+    const allProjects = new Set([
+        ...participantWeighted.map(r => r.project), 
+        ...rowWeighted.map(r => r.project),
+        ...judgesWeighted.map(r => r.project)
+    ]);
     const finalResults = [];
     
     for (const project of allProjects) {
         const pScore = participantWeighted.find(r => r.project === project)?.total || 0;
+        const rScore = rowWeighted.find(r => r.project === project)?.total || 0;
         const jScore = judgesWeighted.find(r => r.project === project)?.total || 0;
-        const jScoreScaled = jScore * judgesScaleFactor;
-        const finalScore = (pScore * 0.5) + (jScoreScaled * 0.5);
-        finalResults.push([project, (pScore * 0.5).toFixed(2), (jScoreScaled * 0.5).toFixed(2), finalScore.toFixed(2)]);
+        
+        const rScoreScaled = rScore * scaleFactor;
+        const jScoreScaled = jScore * scaleFactor;
+        
+        const pContrib = pScore * 0.4;
+        const rContrib = rScoreScaled * 0.2;
+        const jContrib = jScoreScaled * 0.4;
+        const finalScore = pContrib + rContrib + jContrib;
+        
+        finalResults.push([project, pContrib.toFixed(2), rContrib.toFixed(2), jContrib.toFixed(2), finalScore.toFixed(2)]);
     }
     
-    finalResults.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]));
+    finalResults.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
     
     if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:D')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: finalResults })
         });
     }
     
     console.log('=== AGGREGATION COMPLETE ===');
-    return { participantVotes: participantVotes.length, judgesVotes: judgesVotes.length, projects: allProjects.size };
+    return { participantVotes: participantVotes.length, rowVotes: rowVotes.length, judgesVotes: judgesVotes.length, projects: allProjects.size };
 }
 
 async function generateTestData(accessToken, createdForms, resultsSpreadsheet, responsesPerForm = 3) {
@@ -1912,7 +2017,8 @@ async function generateTestData(accessToken, createdForms, resultsSpreadsheet, r
         if (!formData.formId || formData.status !== 'created') continue;
         
         const isJudges = formData.isJudgesForm || formData.teamName === 'Judges';
-        const numResponses = isJudges ? 5 : responsesPerForm;
+        const isRoW = formData.isRoWForm || formData.teamName === 'RoW';
+        const numResponses = (isJudges || isRoW) ? 5 : responsesPerForm;
         
         // Use already-linked response spreadsheet, or create one if missing
         let responseSpreadsheetId = formData.responseSpreadsheetId;
@@ -1960,7 +2066,7 @@ async function generateTestData(accessToken, createdForms, resultsSpreadsheet, r
     
     console.log('=== TEST DATA GENERATION COMPLETE ===');
     return {
-        rawVotes: result.participantVotes + result.judgesVotes,
+        rawVotes: result.participantVotes + (result.rowVotes || 0) + result.judgesVotes,
         projects: result.projects,
         spreadsheetUrl: resultsSpreadsheet.spreadsheetUrl
     };
@@ -1971,8 +2077,10 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     console.log('=== GENERATING TEST DATA (Direct) ===');
     
     const participantVotes = [];
+    const rowVotes = [];
     const judgesVotes = [];
     const participantScores = {};
+    const rowScores = {};
     const judgesScores = {};
     const categories = ['Business Impact', 'Production Readiness', 'Presentation'];
     const weights = { impact: 0.4, readiness: 0.4, presentation: 0.2 };
@@ -1982,19 +2090,23 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         if (!formData.votingOptions || formData.votingOptions.length === 0) continue;
         
         const isJudges = formData.isJudgesForm || formData.teamName === 'Judges';
+        const isRoW = formData.isRoWForm || formData.teamName === 'RoW';
         const votingOptions = formData.votingOptions;
         const numProjects = votingOptions.length;
-        const targetVotes = isJudges ? judgesVotes : participantVotes;
-        const targetScores = isJudges ? judgesScores : participantScores;
+        const targetVotes = isJudges ? judgesVotes : isRoW ? rowVotes : participantVotes;
+        const targetScores = isJudges ? judgesScores : isRoW ? rowScores : participantScores;
         
-        const numResponses = isJudges ? 5 : responsesPerForm; // More judge responses
-        console.log(`Generating ${numResponses} test responses for: ${formData.teamName} (${isJudges ? 'JUDGES' : 'participant'})`);
+        const numResponses = (isJudges || isRoW) ? 5 : responsesPerForm; // More judge/RoW responses
+        const typeLabel = isJudges ? 'JUDGES' : isRoW ? 'ROW' : 'participant';
+        console.log(`Generating ${numResponses} test responses for: ${formData.teamName} (${typeLabel})`);
         
         for (let r = 0; r < numResponses; r++) {
             const timestamp = new Date().toISOString();
             const fakeEmail = isJudges 
                 ? `judge${r + 1}@company.test`
-                : `tester${r + 1}@${formData.teamName.toLowerCase().replace(/\s+/g, '')}.test`;
+                : isRoW 
+                    ? `row${r + 1}@company.test`
+                    : `tester${r + 1}@${formData.teamName.toLowerCase().replace(/\s+/g, '')}.test`;
             
             for (const category of categories) {
                 const ranks = Array.from({ length: numProjects }, (_, i) => i + 1);
@@ -2021,7 +2133,7 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         }
     }
     
-    console.log(`Generated ${participantVotes.length} participant votes, ${judgesVotes.length} judges votes`);
+    console.log(`Generated ${participantVotes.length} participant votes, ${rowVotes.length} RoW votes, ${judgesVotes.length} judges votes`);
     
     // Helper to calculate weighted results
     function calcWeightedResults(scores) {
@@ -2038,6 +2150,7 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     }
     
     const participantWeighted = calcWeightedResults(participantScores);
+    const rowWeighted = calcWeightedResults(rowScores);
     const judgesWeighted = calcWeightedResults(judgesScores);
     
     // Write to spreadsheet
@@ -2050,6 +2163,15 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
             body: JSON.stringify({ values: participantVotes })
         });
         console.log(`✓ Wrote ${participantVotes.length} participant votes`);
+    }
+    
+    // RoW Votes
+    if (rowVotes.length > 0) {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: rowVotes })
+        });
+        console.log(`✓ Wrote ${rowVotes.length} RoW votes`);
     }
     
     // Judges Votes
@@ -2071,6 +2193,16 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} participant weighted results`);
     }
     
+    // RoW Weighted Results
+    if (rowWeighted.length > 0) {
+        const data = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: data })
+        });
+        console.log(`✓ Wrote ${data.length} RoW weighted results`);
+    }
+    
     // Judges Weighted Results
     if (judgesWeighted.length > 0) {
         const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
@@ -2081,33 +2213,45 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         console.log(`✓ Wrote ${data.length} judges weighted results`);
     }
     
-    // Final Weighted Results (50% participants + 50% judges)
-    // Judges score 1-5, Participants score 1-4, so scale judges by 4/5 = 0.8
-    const judgesScaleFactor = 4 / 5; // = 0.8
+    // Final Weighted Results: Participants 40%, RoW 20%, Judges 40%
+    // RoW and Judges score 1-5, Participants score 1-4, so scale by 4/5 = 0.8
+    const scaleFactor = 4 / 5; // = 0.8
     
-    const allProjects = new Set([...participantWeighted.map(r => r.project), ...judgesWeighted.map(r => r.project)]);
+    const allProjects = new Set([
+        ...participantWeighted.map(r => r.project), 
+        ...rowWeighted.map(r => r.project),
+        ...judgesWeighted.map(r => r.project)
+    ]);
     const finalResults = [];
     
     for (const project of allProjects) {
         const pScore = participantWeighted.find(r => r.project === project)?.total || 0;
+        const rScore = rowWeighted.find(r => r.project === project)?.total || 0;
         const jScore = judgesWeighted.find(r => r.project === project)?.total || 0;
         
-        // Scale judges down to be comparable, then 50/50
-        const jScoreScaled = jScore * judgesScaleFactor;
-        const finalScore = (pScore * 0.5) + (jScoreScaled * 0.5);
+        // Scale RoW and Judges down to be comparable
+        const rScoreScaled = rScore * scaleFactor;
+        const jScoreScaled = jScore * scaleFactor;
+        
+        // Weights: Participants 40%, RoW 20%, Judges 40%
+        const pContrib = pScore * 0.4;
+        const rContrib = rScoreScaled * 0.2;
+        const jContrib = jScoreScaled * 0.4;
+        const finalScore = pContrib + rContrib + jContrib;
         
         finalResults.push([
             project, 
-            (pScore * 0.5).toFixed(2),      // Participants contribution (50%)
-            (jScoreScaled * 0.5).toFixed(2), // Judges contribution (50%, scaled)
-            finalScore.toFixed(2)            // Final score
+            pContrib.toFixed(2),   // Participants contribution (40%)
+            rContrib.toFixed(2),   // RoW contribution (20%, scaled)
+            jContrib.toFixed(2),   // Judges contribution (40%, scaled)
+            finalScore.toFixed(2)  // Final score
         ]);
     }
     
-    finalResults.sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]));
+    finalResults.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
     
     if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:D')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: finalResults })
         });
@@ -2117,7 +2261,7 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     console.log('=== TEST DATA GENERATION COMPLETE ===');
     
     return {
-        rawVotes: participantVotes.length + judgesVotes.length,
+        rawVotes: participantVotes.length + rowVotes.length + judgesVotes.length,
         projects: allProjects.size,
         spreadsheetUrl: resultsSpreadsheet.spreadsheetUrl
     };
