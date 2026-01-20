@@ -1085,6 +1085,124 @@ async function restrictFormToEmails(accessToken, formId, allowedEmails) {
 }
 
 /**
+ * Ensures required sheets exist in a spreadsheet. Creates any missing sheets.
+ * @param {string} accessToken - OAuth access token
+ * @param {string} spreadsheetId - The spreadsheet ID
+ * @param {Array<string>} requiredSheets - Array of sheet names that must exist
+ */
+async function ensureSheetsExist(accessToken, spreadsheetId, requiredSheets) {
+    try {
+        // Get current sheets in the spreadsheet
+        const metadataResponse = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        
+        if (!metadataResponse.ok) {
+            console.warn('Could not get spreadsheet metadata, will try to create sheets anyway');
+            return;
+        }
+        
+        const metadata = await metadataResponse.json();
+        const existingSheets = (metadata.sheets || []).map(s => s.properties.title);
+        console.log(`Existing sheets: ${existingSheets.join(', ')}`);
+        
+        // Find which sheets need to be created
+        const sheetsToCreate = requiredSheets.filter(name => !existingSheets.includes(name));
+        
+        if (sheetsToCreate.length === 0) {
+            console.log('All required sheets already exist');
+            return;
+        }
+        
+        console.log(`Creating missing sheets: ${sheetsToCreate.join(', ')}`);
+        
+        // Create missing sheets using batchUpdate
+        const requests = sheetsToCreate.map(sheetName => ({
+            addSheet: {
+                properties: {
+                    title: sheetName,
+                    gridProperties: { rowCount: 1000, columnCount: 20 }
+                }
+            }
+        }));
+        
+        const batchResponse = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+            {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requests })
+            }
+        );
+        
+        if (batchResponse.ok) {
+            console.log(`✓ Created ${sheetsToCreate.length} missing sheets`);
+        } else {
+            const error = await batchResponse.json();
+            console.warn('Failed to create some sheets:', error);
+        }
+    } catch (error) {
+        console.warn('Error ensuring sheets exist (will continue anyway):', error.message);
+    }
+}
+
+/**
+ * Safely clears a sheet range, ignoring errors if sheet doesn't exist
+ * @param {string} accessToken - OAuth access token
+ * @param {string} spreadsheetId - The spreadsheet ID
+ * @param {string} range - The range to clear (e.g., 'Sheet1!A2:Z')
+ */
+async function safeClearRange(accessToken, spreadsheetId, range) {
+    try {
+        const response = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`,
+            {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+            }
+        );
+        if (!response.ok) {
+            // Silently ignore - sheet might not exist
+            console.log(`Note: Could not clear ${range.split('!')[0]} (may not exist yet)`);
+        }
+    } catch (error) {
+        // Silently ignore
+    }
+}
+
+/**
+ * Safely writes to a sheet range, ignoring errors if sheet doesn't exist
+ * @param {string} accessToken - OAuth access token
+ * @param {string} spreadsheetId - The spreadsheet ID
+ * @param {string} range - The range to write to
+ * @param {Array} values - The values to write
+ * @param {string} method - 'PUT' or 'POST' (for append)
+ */
+async function safeWriteRange(accessToken, spreadsheetId, range, values, method = 'PUT') {
+    if (!values || values.length === 0) return;
+    
+    try {
+        const url = method === 'POST' 
+            ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`
+            : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            console.warn(`Warning: Could not write to ${range}:`, error.error?.message || 'unknown error');
+        }
+    } catch (error) {
+        console.warn(`Warning: Error writing to ${range}:`, error.message);
+    }
+}
+
+/**
  * Creates a results spreadsheet with raw votes and weighted scores
  * @param {string} accessToken - OAuth access token
  * @param {Object} votingData - Voting data from generateVotingForms()
@@ -1407,7 +1525,15 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
     
-    // Clear all data sheets first (keep headers in row 1)
+    // Ensure all required sheets exist (create if missing)
+    const requiredSheets = [
+        'Participants Votes', 'RoW Votes', 'Judges Votes',
+        'Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results',
+        'Final Weighted Results'
+    ];
+    await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
+    
+    // Clear all data sheets first (keep headers in row 1) - safe version ignores missing sheets
     console.log('Clearing existing data from sheets...');
     const sheetsToClear = [
         'Participants Votes!A2:Z',
@@ -1420,10 +1546,7 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
     ];
     
     for (const range of sheetsToClear) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
-        });
+        await safeClearRange(accessToken, spreadsheetId, range);
     }
     console.log('✓ Cleared existing data');
     
@@ -1900,7 +2023,7 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
     }
     
     console.log(`Aggregated ${participantVotes.length} participant votes, ${rowVotes.length} RoW votes, ${judgesVotes.length} judges votes`);
-    
+
     // Calculate weighted results
     function calcWeightedResults(scores) {
         const results = [];
@@ -1914,61 +2037,39 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
         results.sort((a, b) => b.total - a.total);
         return results;
     }
-    
+
     const participantWeighted = calcWeightedResults(participantScores);
     const rowWeighted = calcWeightedResults(rowScores);
     const judgesWeighted = calcWeightedResults(judgesScores);
-    
+
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
-    
+
+    // Ensure all required sheets exist (create if missing)
+    const requiredSheets = [
+        'Participants Votes', 'RoW Votes', 'Judges Votes',
+        'Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results',
+        'Final Weighted Results'
+    ];
+    await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
+
     // Write Participants Votes
-    if (participantVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: participantVotes })
-        });
-    }
-    
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Votes!A2:G', participantVotes, 'POST');
+
     // Write RoW Votes
-    if (rowVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: rowVotes })
-        });
-    }
-    
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Votes!A2:G', rowVotes, 'POST');
+
     // Write Judges Votes
-    if (judgesVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: judgesVotes })
-        });
-    }
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Votes!A2:G', judgesVotes, 'POST');
     
-    // Write weighted results
-    if (participantWeighted.length > 0) {
-        const data = participantWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-    }
-    
-    if (rowWeighted.length > 0) {
-        const data = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-    }
-    
-    if (judgesWeighted.length > 0) {
-        const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-    }
+    // Write weighted results (using safe write that handles missing sheets)
+    const participantWeightedData = participantWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Weighted Results!A2:E', participantWeightedData, 'POST');
+
+    const rowWeightedData = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Weighted Results!A2:E', rowWeightedData, 'POST');
+
+    const judgesWeightedData = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Weighted Results!A2:E', judgesWeightedData, 'POST');
     
     // Final Weighted Results: Participants 40%, RoW 20%, Judges 40%
     // RoW and Judges use 1-5 scale, Participants use 1-4, scale by 4/5 = 0.8
@@ -1998,12 +2099,7 @@ async function aggregateFromFormSpreadsheets(accessToken, createdForms, resultsS
     
     finalResults.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
     
-    if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: finalResults })
-        });
-    }
+    await safeWriteRange(accessToken, spreadsheetId, 'Final Weighted Results!A2:E', finalResults, 'POST');
     
     console.log('=== AGGREGATION COMPLETE ===');
     return { participantVotes: participantVotes.length, rowVotes: rowVotes.length, judgesVotes: judgesVotes.length, projects: allProjects.size };
@@ -2156,62 +2252,36 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     // Write to spreadsheet
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
     
-    // Participants Votes
-    if (participantVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: participantVotes })
-        });
-        console.log(`✓ Wrote ${participantVotes.length} participant votes`);
-    }
+    // Ensure all required sheets exist (create if missing)
+    const requiredSheets = [
+        'Participants Votes', 'RoW Votes', 'Judges Votes',
+        'Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results',
+        'Final Weighted Results'
+    ];
+    await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
     
-    // RoW Votes
-    if (rowVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: rowVotes })
-        });
-        console.log(`✓ Wrote ${rowVotes.length} RoW votes`);
-    }
+    // Write votes (using safe write that handles missing sheets)
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Votes!A2:G', participantVotes, 'POST');
+    if (participantVotes.length > 0) console.log(`✓ Wrote ${participantVotes.length} participant votes`);
     
-    // Judges Votes
-    if (judgesVotes.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Votes!A2:G')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: judgesVotes })
-        });
-        console.log(`✓ Wrote ${judgesVotes.length} judges votes`);
-    }
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Votes!A2:G', rowVotes, 'POST');
+    if (rowVotes.length > 0) console.log(`✓ Wrote ${rowVotes.length} RoW votes`);
     
-    // Participants Weighted Results
-    if (participantWeighted.length > 0) {
-        const data = participantWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Participants Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-        console.log(`✓ Wrote ${data.length} participant weighted results`);
-    }
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Votes!A2:G', judgesVotes, 'POST');
+    if (judgesVotes.length > 0) console.log(`✓ Wrote ${judgesVotes.length} judges votes`);
     
-    // RoW Weighted Results
-    if (rowWeighted.length > 0) {
-        const data = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('RoW Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-        console.log(`✓ Wrote ${data.length} RoW weighted results`);
-    }
+    // Write weighted results
+    const participantWeightedData = participantWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Weighted Results!A2:E', participantWeightedData, 'POST');
+    if (participantWeightedData.length > 0) console.log(`✓ Wrote ${participantWeightedData.length} participant weighted results`);
     
-    // Judges Weighted Results
-    if (judgesWeighted.length > 0) {
-        const data = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Judges Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: data })
-        });
-        console.log(`✓ Wrote ${data.length} judges weighted results`);
-    }
+    const rowWeightedData = rowWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Weighted Results!A2:E', rowWeightedData, 'POST');
+    if (rowWeightedData.length > 0) console.log(`✓ Wrote ${rowWeightedData.length} RoW weighted results`);
+    
+    const judgesWeightedData = judgesWeighted.map(r => [r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)]);
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Weighted Results!A2:E', judgesWeightedData, 'POST');
+    if (judgesWeightedData.length > 0) console.log(`✓ Wrote ${judgesWeightedData.length} judges weighted results`);
     
     // Final Weighted Results: Participants 40%, RoW 20%, Judges 40%
     // RoW and Judges score 1-5, Participants score 1-4, so scale by 4/5 = 0.8
@@ -2250,13 +2320,8 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     
     finalResults.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
     
-    if (finalResults.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A2:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: finalResults })
-        });
-        console.log(`✓ Wrote ${finalResults.length} final weighted results`);
-    }
+    await safeWriteRange(accessToken, spreadsheetId, 'Final Weighted Results!A2:E', finalResults, 'POST');
+    if (finalResults.length > 0) console.log(`✓ Wrote ${finalResults.length} final weighted results`);
     
     console.log('=== TEST DATA GENERATION COMPLETE ===');
     
