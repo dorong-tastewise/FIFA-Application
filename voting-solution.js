@@ -2736,20 +2736,28 @@ function addVotingButtonToUI() {
                 console.log(`Found ${Object.keys(createdForms.forms).length} forms in folder`);
                 
                 // Try to get voting options from first form
-                const firstFormId = Object.keys(createdForms.forms)[0];
-                if (firstFormId) {
+                const firstFormKey = Object.keys(createdForms.forms)[0];
+                const firstFormData = createdForms.forms[firstFormKey];
+                const actualFormId = firstFormData?.formId; // Get the ACTUAL Google Form ID, not the key
+                
+                console.log(`First form key: ${firstFormKey}, actual Google Form ID: ${actualFormId}`);
+                
+                if (actualFormId) {
                     try {
-                        const formResponse = await fetch(`https://forms.googleapis.com/v1/forms/${firstFormId}`, {
+                        console.log(`Fetching form structure from: https://forms.googleapis.com/v1/forms/${actualFormId}`);
+                        const formResponse = await fetch(`https://forms.googleapis.com/v1/forms/${actualFormId}`, {
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
                         if (formResponse.ok) {
                             const formData = await formResponse.json();
+                            console.log(`Form structure received, items: ${formData.items?.length || 0}`);
                             const items = formData.items || [];
                             // Extract project names from first grid question
                             for (const item of items) {
                                 if (item.questionGroupItem) {
                                     const questions = item.questionGroupItem.questions || [];
                                     const votingOptions = questions.map(q => q.rowQuestion?.title).filter(Boolean);
+                                    console.log(`Extracted ${votingOptions.length} voting options:`, votingOptions);
                                     // Add votingOptions to all forms
                                     for (const fid of Object.keys(createdForms.forms)) {
                                         createdForms.forms[fid].votingOptions = votingOptions;
@@ -2757,10 +2765,14 @@ function addVotingButtonToUI() {
                                     break;
                                 }
                             }
+                        } else {
+                            console.error(`Failed to fetch form structure: ${formResponse.status}`);
                         }
                     } catch (e) {
-                        console.warn('Could not fetch form details:', e);
+                        console.error('Could not fetch form details:', e);
                     }
+                } else {
+                    console.error('No actual form ID found - cannot fetch voting options');
                 }
                 
                 console.log('Reconstructed createdForms:', createdForms);
@@ -3393,29 +3405,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log(`Found ${Object.keys(createdForms.forms).length} forms in folder`);
                 
                 // Try to get voting options from first form
-                const firstFormId = Object.keys(createdForms.forms)[0];
-                if (firstFormId) {
+                const firstFormKey = Object.keys(createdForms.forms)[0];
+                const firstFormData = createdForms.forms[firstFormKey];
+                const actualFormId = firstFormData?.formId;
+                
+                console.log(`[Resume] First form key: ${firstFormKey}, actual Form ID: ${actualFormId}`);
+                
+                if (actualFormId) {
                     try {
-                        const formResponse = await fetch(`https://forms.googleapis.com/v1/forms/${firstFormId}`, {
+                        console.log(`[Resume] Fetching form structure...`);
+                        const formResponse = await fetch(`https://forms.googleapis.com/v1/forms/${actualFormId}`, {
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
                         if (formResponse.ok) {
                             const formData = await formResponse.json();
+                            console.log(`[Resume] Got form data, items: ${formData.items?.length || 0}`);
                             const items = formData.items || [];
                             for (const item of items) {
                                 if (item.questionGroupItem) {
                                     const questions = item.questionGroupItem.questions || [];
                                     const votingOptions = questions.map(q => q.rowQuestion?.title).filter(Boolean);
+                                    console.log(`[Resume] Extracted ${votingOptions.length} voting options:`, votingOptions);
                                     for (const fid of Object.keys(createdForms.forms)) {
                                         createdForms.forms[fid].votingOptions = votingOptions;
                                     }
                                     break;
                                 }
                             }
+                        } else {
+                            console.error(`[Resume] Failed to fetch form: ${formResponse.status}`);
+                            const errText = await formResponse.text();
+                            console.error(`[Resume] Error details:`, errText);
                         }
                     } catch (e) {
-                        console.warn('Could not fetch form details:', e);
+                        console.error('[Resume] Could not fetch form details:', e);
                     }
+                } else {
+                    console.error('[Resume] No form ID found to fetch voting options');
                 }
                 
                 const votingData = { forms: {} };
