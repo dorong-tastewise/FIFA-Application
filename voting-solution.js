@@ -3046,6 +3046,9 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 <button id="generateTestDataBtn" style="padding: 8px 16px; background: #9C27B0; color: white; border: none; border-radius: 5px; cursor: pointer;">
                     🧪 Generate Test Data
                 </button>
+                <button id="runSanityTestsBtn" style="padding: 8px 16px; background: #FF5722; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
+                    🔬 Run Sanity Tests
+                </button>
             </div>`;
     }
     
@@ -3164,6 +3167,46 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 alert(`Error: ${error.message}\n\nCheck browser console (F12) for details.`);
                 testDataBtn.disabled = false;
                 testDataBtn.textContent = '🧪 Generate Test Data';
+            }
+        });
+    }
+    
+    // Run Sanity Tests button handler
+    const sanityTestsBtn = document.getElementById('runSanityTestsBtn');
+    if (sanityTestsBtn) {
+        sanityTestsBtn.addEventListener('click', async () => {
+            sanityTestsBtn.disabled = true;
+            sanityTestsBtn.textContent = '🔬 Running Tests...';
+            
+            try {
+                const token = accessToken || _votingAccessToken;
+                if (!token) {
+                    throw new Error('No access token available');
+                }
+                
+                const spreadsheetId = createdForms.resultsSpreadsheet?.spreadsheetId;
+                if (!spreadsheetId) {
+                    throw new Error('No results spreadsheet found. Generate test data first.');
+                }
+                
+                console.clear();
+                const results = await runSanityTests(token, spreadsheetId);
+                
+                // Show results in alert
+                const summary = results.failed === 0 
+                    ? `✅ ALL ${results.passed} TESTS PASSED!`
+                    : `⚠️ ${results.passed} passed, ${results.failed} failed`;
+                
+                let details = results.tests.map(t => `${t.passed ? '✅' : '❌'} ${t.name}`).join('\n');
+                
+                alert(`SANITY TEST RESULTS\n\n${summary}\n\n${details}\n\nSee console (F12) for full details.`);
+                
+            } catch (error) {
+                console.error('Sanity test error:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                sanityTestsBtn.disabled = false;
+                sanityTestsBtn.textContent = '🔬 Run Sanity Tests';
             }
         });
     }
@@ -3378,6 +3421,438 @@ document.addEventListener('DOMContentLoaded', function() {
 window.addVotingButtonToUI = addVotingButtonToUI;
 window.generateTestData = generateTestData;
 
+// ==================== SANITY TEST SUITE ====================
+// Tests to verify the voting data processing is working correctly
+
+/**
+ * Run all sanity tests
+ * @param {string} accessToken - OAuth access token
+ * @param {string} spreadsheetId - Results spreadsheet ID to test against
+ * @returns {Promise<Object>} Test results with pass/fail counts
+ */
+async function runSanityTests(accessToken, spreadsheetId) {
+    console.log('╔══════════════════════════════════════════════════════════════╗');
+    console.log('║              VOTING SANITY TEST SUITE                        ║');
+    console.log('╚══════════════════════════════════════════════════════════════╝');
+    
+    const results = {
+        passed: 0,
+        failed: 0,
+        tests: []
+    };
+    
+    function addResult(name, passed, message, details = null) {
+        const status = passed ? '✅ PASS' : '❌ FAIL';
+        console.log(`${status}: ${name}`);
+        if (message) console.log(`       ${message}`);
+        if (details && !passed) console.log(`       Details:`, details);
+        results.tests.push({ name, passed, message, details });
+        if (passed) results.passed++;
+        else results.failed++;
+    }
+    
+    // ==================== UNIT TESTS ====================
+    console.log('\n─── UNIT TESTS: Calculation Functions ───');
+    
+    // Test 1: calculateWeightedResults with known values
+    try {
+        const testScores = {
+            'Project A': { impact: [4, 4, 4], readiness: [3, 3, 3], presentation: [2, 2, 2] },
+            'Project B': { impact: [2, 2, 2], readiness: [4, 4, 4], presentation: [3, 3, 3] }
+        };
+        const weighted = calculateWeightedResults(testScores);
+        
+        // Project A: impact=4*0.4=1.6, readiness=3*0.4=1.2, presentation=2*0.2=0.4, total=3.2
+        // Project B: impact=2*0.4=0.8, readiness=4*0.4=1.6, presentation=3*0.2=0.6, total=3.0
+        const projA = weighted.find(r => r.project === 'Project A');
+        const projB = weighted.find(r => r.project === 'Project B');
+        
+        const expectedA = { impact: 1.6, readiness: 1.2, presentation: 0.4, total: 3.2 };
+        const expectedB = { impact: 0.8, readiness: 1.6, presentation: 0.6, total: 3.0 };
+        
+        const toleranceOk = (a, b) => Math.abs(a - b) < 0.001;
+        
+        const aOk = toleranceOk(projA.impact, expectedA.impact) && 
+                    toleranceOk(projA.readiness, expectedA.readiness) &&
+                    toleranceOk(projA.presentation, expectedA.presentation) &&
+                    toleranceOk(projA.total, expectedA.total);
+        const bOk = toleranceOk(projB.impact, expectedB.impact) && 
+                    toleranceOk(projB.readiness, expectedB.readiness) &&
+                    toleranceOk(projB.presentation, expectedB.presentation) &&
+                    toleranceOk(projB.total, expectedB.total);
+        
+        addResult(
+            'calculateWeightedResults - Category weights (40/40/20)',
+            aOk && bOk,
+            aOk && bOk ? 'Correct: A=3.2, B=3.0' : `Expected A=${JSON.stringify(expectedA)}, B=${JSON.stringify(expectedB)}`,
+            { projA, projB }
+        );
+    } catch (e) {
+        addResult('calculateWeightedResults - Category weights', false, e.message);
+    }
+    
+    // Test 2: calculateWeightedResults sorts by total descending
+    try {
+        const testScores = {
+            'Low': { impact: [1], readiness: [1], presentation: [1] },
+            'High': { impact: [4], readiness: [4], presentation: [4] },
+            'Mid': { impact: [2], readiness: [2], presentation: [2] }
+        };
+        const weighted = calculateWeightedResults(testScores);
+        const order = weighted.map(r => r.project);
+        const expectedOrder = ['High', 'Mid', 'Low'];
+        const orderOk = order[0] === expectedOrder[0] && order[1] === expectedOrder[1] && order[2] === expectedOrder[2];
+        
+        addResult(
+            'calculateWeightedResults - Sorting descending by total',
+            orderOk,
+            orderOk ? `Correct order: ${order.join(' > ')}` : `Expected ${expectedOrder.join(' > ')}, got ${order.join(' > ')}`
+        );
+    } catch (e) {
+        addResult('calculateWeightedResults - Sorting', false, e.message);
+    }
+    
+    // Test 3: calculateFinalResults with known values and scaling
+    try {
+        const pWeighted = [{ project: 'Test', total: 3.0 }];  // Participants (1-4 scale)
+        const rWeighted = [{ project: 'Test', total: 3.75 }]; // RoW (1-5 scale) -> 3.75 * 0.8 = 3.0
+        const jWeighted = [{ project: 'Test', total: 3.75 }]; // Judges (1-5 scale) -> 3.75 * 0.8 = 3.0
+        
+        const final = calculateFinalResults(pWeighted, rWeighted, jWeighted);
+        const testProj = final.find(r => r[0] === 'Test');
+        
+        // pContrib = 3.0 * 0.4 = 1.2
+        // rContrib = (3.75 * 0.8) * 0.2 = 3.0 * 0.2 = 0.6
+        // jContrib = (3.75 * 0.8) * 0.4 = 3.0 * 0.4 = 1.2
+        // total = 1.2 + 0.6 + 1.2 = 3.0
+        
+        const expectedP = 1.2, expectedR = 0.6, expectedJ = 1.2, expectedTotal = 3.0;
+        const toleranceOk = (a, b) => Math.abs(a - b) < 0.01;
+        
+        const ok = testProj && 
+                   toleranceOk(testProj[1], expectedP) &&
+                   toleranceOk(testProj[2], expectedR) &&
+                   toleranceOk(testProj[3], expectedJ) &&
+                   toleranceOk(testProj[4], expectedTotal);
+        
+        addResult(
+            'calculateFinalResults - Group weights (40/20/40) with scaling',
+            ok,
+            ok ? `Correct: P=${testProj[1]}, R=${testProj[2]}, J=${testProj[3]}, Total=${testProj[4]}` :
+                 `Expected P=${expectedP}, R=${expectedR}, J=${expectedJ}, Total=${expectedTotal}`,
+            testProj
+        );
+    } catch (e) {
+        addResult('calculateFinalResults - Group weights', false, e.message);
+    }
+    
+    // Test 4: Verify constants are correct
+    try {
+        const catOk = CATEGORY_WEIGHTS.impact === 0.4 && 
+                      CATEGORY_WEIGHTS.readiness === 0.4 && 
+                      CATEGORY_WEIGHTS.presentation === 0.2;
+        const catSum = CATEGORY_WEIGHTS.impact + CATEGORY_WEIGHTS.readiness + CATEGORY_WEIGHTS.presentation;
+        
+        addResult(
+            'Constants - CATEGORY_WEIGHTS sum to 1.0',
+            catOk && Math.abs(catSum - 1.0) < 0.001,
+            `Impact=${CATEGORY_WEIGHTS.impact}, Readiness=${CATEGORY_WEIGHTS.readiness}, Presentation=${CATEGORY_WEIGHTS.presentation}, Sum=${catSum}`
+        );
+        
+        const grpOk = GROUP_WEIGHTS.participants === 0.4 && 
+                      GROUP_WEIGHTS.row === 0.2 && 
+                      GROUP_WEIGHTS.judges === 0.4;
+        const grpSum = GROUP_WEIGHTS.participants + GROUP_WEIGHTS.row + GROUP_WEIGHTS.judges;
+        
+        addResult(
+            'Constants - GROUP_WEIGHTS sum to 1.0',
+            grpOk && Math.abs(grpSum - 1.0) < 0.001,
+            `Participants=${GROUP_WEIGHTS.participants}, RoW=${GROUP_WEIGHTS.row}, Judges=${GROUP_WEIGHTS.judges}, Sum=${grpSum}`
+        );
+        
+        addResult(
+            'Constants - SCALE_FACTOR is 0.8 (4/5)',
+            Math.abs(SCALE_FACTOR - 0.8) < 0.001,
+            `SCALE_FACTOR=${SCALE_FACTOR}`
+        );
+    } catch (e) {
+        addResult('Constants verification', false, e.message);
+    }
+    
+    // ==================== INTEGRATION TESTS (if spreadsheet provided) ====================
+    if (accessToken && spreadsheetId) {
+        console.log('\n─── INTEGRATION TESTS: Spreadsheet Data ───');
+        
+        try {
+            // Read all sheets
+            const sheets = [
+                'Participants Votes', 'RoW Votes', 'Judges Votes',
+                'Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results',
+                'Final Weighted Results'
+            ];
+            
+            const sheetData = {};
+            for (const sheet of sheets) {
+                const response = await fetch(
+                    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheet + '!A1:Z1000')}`,
+                    { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    sheetData[sheet] = data.values || [];
+                } else {
+                    sheetData[sheet] = null;
+                }
+            }
+            
+            // Test 5: All required sheets exist and have headers
+            for (const sheet of sheets) {
+                const exists = sheetData[sheet] !== null && sheetData[sheet].length > 0;
+                addResult(
+                    `Sheet exists: ${sheet}`,
+                    exists,
+                    exists ? `Has ${sheetData[sheet].length - 1} data rows` : 'Sheet missing or empty'
+                );
+            }
+            
+            // Test 6: Verify headers are correct
+            const votesHeaders = ['Timestamp', 'Email', 'Form', 'Category', 'Project', 'Rank', 'Points'];
+            const weightedHeaders = ['Project', 'Business Impact (40%)', 'Production Readiness (40%)', 'Presentation (20%)', 'Total Score'];
+            const finalHeaders = ['Project', 'Participants (40%)', 'RoW (20%, scaled 0.8)', 'Judges (40%, scaled 0.8)', 'Final Score'];
+            
+            for (const sheet of ['Participants Votes', 'RoW Votes', 'Judges Votes']) {
+                if (sheetData[sheet] && sheetData[sheet].length > 0) {
+                    const headers = sheetData[sheet][0];
+                    const ok = votesHeaders.every((h, i) => headers[i] === h);
+                    addResult(
+                        `Headers correct: ${sheet}`,
+                        ok,
+                        ok ? 'All 7 vote headers present' : `Expected ${votesHeaders.join(', ')}`
+                    );
+                }
+            }
+            
+            for (const sheet of ['Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results']) {
+                if (sheetData[sheet] && sheetData[sheet].length > 0) {
+                    const headers = sheetData[sheet][0];
+                    const ok = weightedHeaders.every((h, i) => headers[i] === h);
+                    addResult(
+                        `Headers correct: ${sheet}`,
+                        ok,
+                        ok ? 'All 5 weighted headers present' : `Expected ${weightedHeaders.join(', ')}`
+                    );
+                }
+            }
+            
+            if (sheetData['Final Weighted Results'] && sheetData['Final Weighted Results'].length > 0) {
+                const headers = sheetData['Final Weighted Results'][0];
+                const ok = finalHeaders.every((h, i) => headers[i] === h);
+                addResult(
+                    'Headers correct: Final Weighted Results',
+                    ok,
+                    ok ? 'All 5 final headers present (with group percentages)' : `Got: ${headers.join(', ')}`
+                );
+            }
+            
+            // Test 7: Cross-check project counts
+            const getProjects = (rows) => {
+                if (!rows || rows.length < 2) return new Set();
+                return new Set(rows.slice(1).map(r => r[0]).filter(Boolean));
+            };
+            
+            const pProjects = getProjects(sheetData['Participants Weighted Results']);
+            const rProjects = getProjects(sheetData['RoW Weighted Results']);
+            const jProjects = getProjects(sheetData['Judges Weighted Results']);
+            const fProjects = getProjects(sheetData['Final Weighted Results']);
+            
+            // All projects in weighted results should be in final results
+            const allWeightedProjects = new Set([...pProjects, ...rProjects, ...jProjects]);
+            const allInFinal = [...allWeightedProjects].every(p => fProjects.has(p));
+            const finalHasAll = [...fProjects].every(p => allWeightedProjects.has(p));
+            
+            addResult(
+                'Cross-check: All weighted projects appear in Final',
+                allInFinal && finalHasAll,
+                `Weighted projects: ${allWeightedProjects.size}, Final projects: ${fProjects.size}`
+            );
+            
+            // Test 8: Verify Final Weighted Results calculations
+            if (sheetData['Final Weighted Results'] && sheetData['Final Weighted Results'].length > 1) {
+                console.log('\n─── CALCULATION VERIFICATION ───');
+                
+                let calcErrors = 0;
+                const finalRows = sheetData['Final Weighted Results'].slice(1);
+                
+                for (const row of finalRows.slice(0, 5)) { // Check first 5 projects
+                    const [project, pContrib, rContrib, jContrib, total] = row;
+                    const expectedTotal = parseFloat(pContrib) + parseFloat(rContrib) + parseFloat(jContrib);
+                    const actualTotal = parseFloat(total);
+                    
+                    if (Math.abs(expectedTotal - actualTotal) > 0.01) {
+                        console.log(`  ⚠️ ${project}: P(${pContrib}) + R(${rContrib}) + J(${jContrib}) = ${expectedTotal.toFixed(2)}, but got ${actualTotal}`);
+                        calcErrors++;
+                    }
+                }
+                
+                addResult(
+                    'Final totals = sum of contributions',
+                    calcErrors === 0,
+                    calcErrors === 0 ? 'All checked rows have correct totals' : `${calcErrors} calculation errors found`
+                );
+            }
+            
+            // Test 9: Verify sorting (Final should be sorted by total descending)
+            if (sheetData['Final Weighted Results'] && sheetData['Final Weighted Results'].length > 2) {
+                const totals = sheetData['Final Weighted Results'].slice(1).map(r => parseFloat(r[4]));
+                let isSorted = true;
+                for (let i = 1; i < totals.length; i++) {
+                    if (totals[i] > totals[i-1]) {
+                        isSorted = false;
+                        break;
+                    }
+                }
+                addResult(
+                    'Final Weighted Results sorted by total (descending)',
+                    isSorted,
+                    isSorted ? 'Correctly sorted' : 'Not properly sorted!'
+                );
+            }
+            
+            // Test 10: Verify values are numbers not strings
+            if (sheetData['Final Weighted Results'] && sheetData['Final Weighted Results'].length > 1) {
+                const firstDataRow = sheetData['Final Weighted Results'][1];
+                const numericCols = [1, 2, 3, 4]; // P, R, J, Total columns
+                let allNumeric = true;
+                
+                for (const col of numericCols) {
+                    const val = firstDataRow[col];
+                    if (typeof val === 'string' && val.includes('.') && !isNaN(parseFloat(val))) {
+                        // It's a number stored as string - this is okay from Sheets API
+                    } else if (typeof val !== 'number' && isNaN(parseFloat(val))) {
+                        allNumeric = false;
+                    }
+                }
+                
+                addResult(
+                    'Values are numeric (not text)',
+                    allNumeric,
+                    allNumeric ? 'All numeric columns contain valid numbers' : 'Some columns contain non-numeric values'
+                );
+            }
+            
+            // Test 11: Vote counts consistency
+            const countVotes = (rows, category) => {
+                if (!rows || rows.length < 2) return 0;
+                return rows.slice(1).filter(r => r[3] === category).length;
+            };
+            
+            for (const voteSheet of ['Participants Votes', 'RoW Votes', 'Judges Votes']) {
+                if (sheetData[voteSheet] && sheetData[voteSheet].length > 1) {
+                    const impactCount = countVotes(sheetData[voteSheet], 'Business Impact');
+                    const readinessCount = countVotes(sheetData[voteSheet], 'Production Readiness');
+                    const presentationCount = countVotes(sheetData[voteSheet], 'Presentation');
+                    
+                    // Each category should have the same number of votes (one per project per responder)
+                    const balanced = impactCount === readinessCount && readinessCount === presentationCount;
+                    
+                    addResult(
+                        `Vote balance: ${voteSheet}`,
+                        balanced,
+                        `Impact=${impactCount}, Readiness=${readinessCount}, Presentation=${presentationCount}`
+                    );
+                }
+            }
+            
+        } catch (e) {
+            addResult('Integration tests', false, `Error: ${e.message}`);
+        }
+    } else {
+        console.log('\n⚠️ Skipping integration tests (no spreadsheet provided)');
+    }
+    
+    // ==================== SUMMARY ====================
+    console.log('\n╔══════════════════════════════════════════════════════════════╗');
+    console.log(`║  RESULTS: ${results.passed} PASSED, ${results.failed} FAILED                              ║`);
+    console.log('╚══════════════════════════════════════════════════════════════╝');
+    
+    if (results.failed > 0) {
+        console.log('\n❌ FAILED TESTS:');
+        results.tests.filter(t => !t.passed).forEach(t => {
+            console.log(`   - ${t.name}: ${t.message}`);
+        });
+    }
+    
+    return results;
+}
+
+/**
+ * Quick sanity check after generating test data
+ * Verifies data was written and calculations are correct
+ */
+async function quickSanityCheck(accessToken, spreadsheetId) {
+    console.log('\n🔍 Running quick sanity check...');
+    
+    const checks = [];
+    
+    // Check Final Weighted Results has data
+    try {
+        const response = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Final Weighted Results!A1:E20')}`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        
+        if (response.ok) {
+            const data = await response.json();
+            const rows = data.values || [];
+            
+            if (rows.length < 2) {
+                checks.push({ ok: false, msg: 'Final Weighted Results is empty!' });
+            } else {
+                checks.push({ ok: true, msg: `Final has ${rows.length - 1} projects` });
+                
+                // Verify header
+                const header = rows[0];
+                if (header[1] !== 'Participants (40%)' || header[2] !== 'RoW (20%, scaled 0.8)' || header[3] !== 'Judges (40%, scaled 0.8)') {
+                    checks.push({ ok: false, msg: 'Headers are wrong!' });
+                } else {
+                    checks.push({ ok: true, msg: 'Headers are correct' });
+                }
+                
+                // Verify first row calculation
+                const firstData = rows[1];
+                const p = parseFloat(firstData[1]);
+                const r = parseFloat(firstData[2]);
+                const j = parseFloat(firstData[3]);
+                const total = parseFloat(firstData[4]);
+                const expected = p + r + j;
+                
+                if (Math.abs(expected - total) < 0.01) {
+                    checks.push({ ok: true, msg: `Calculation OK: ${p} + ${r} + ${j} = ${total}` });
+                } else {
+                    checks.push({ ok: false, msg: `Calculation WRONG: ${p} + ${r} + ${j} should be ${expected.toFixed(2)}, got ${total}` });
+                }
+            }
+        } else {
+            checks.push({ ok: false, msg: 'Could not read Final Weighted Results' });
+        }
+    } catch (e) {
+        checks.push({ ok: false, msg: `Error: ${e.message}` });
+    }
+    
+    // Print results
+    const passed = checks.filter(c => c.ok).length;
+    const failed = checks.filter(c => !c.ok).length;
+    
+    console.log(`\n📊 Quick Check: ${passed}/${checks.length} passed`);
+    checks.forEach(c => console.log(`   ${c.ok ? '✅' : '❌'} ${c.msg}`));
+    
+    return { passed, failed, checks };
+}
+
+// Make test functions globally available
+window.runSanityTests = runSanityTests;
+window.quickSanityCheck = quickSanityCheck;
+
 // Export functions for use in other scripts
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -3386,6 +3861,10 @@ if (typeof module !== 'undefined' && module.exports) {
         exportVotingConfig,
         generateVotingReport,
         addVotingButtonToUI,
-        showVotingFormsModal
+        showVotingFormsModal,
+        runSanityTests,
+        quickSanityCheck,
+        calculateWeightedResults,
+        calculateFinalResults
     };
 }
