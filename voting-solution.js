@@ -2270,13 +2270,16 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     
     // Write to spreadsheet
     const spreadsheetId = resultsSpreadsheet.spreadsheetId;
-    
+    console.log(`>>> Writing test data to spreadsheet: ${spreadsheetId}`);
+    console.log(`>>> Spreadsheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
+
     // Ensure all required sheets exist (create if missing)
     const requiredSheets = [
         'Participants Votes', 'RoW Votes', 'Judges Votes',
         'Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results',
         'Final Weighted Results'
     ];
+    console.log(`>>> Ensuring sheets exist: ${requiredSheets.join(', ')}`);
     await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
     
     // Write votes (using safe write that handles missing sheets)
@@ -3202,20 +3205,28 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
             testDataBtn.textContent = '🧪 Generating...';
 
             try {
-                console.log(`=== GENERATING TEST DATA (Participants: ${numParticipants}, RoW: ${numRoW}, Judges: ${numJudges}) ===`);
-                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, {
+                const targetSpreadsheet = createdForms.resultsSpreadsheet;
+                console.log(`=== GENERATING TEST DATA ===`);
+                console.log(`Target spreadsheet ID: ${targetSpreadsheet.spreadsheetId}`);
+                console.log(`Target spreadsheet URL: ${targetSpreadsheet.spreadsheetUrl}`);
+                console.log(`Responders - Participants: ${numParticipants}, RoW: ${numRoW}, Judges: ${numJudges}`);
+                
+                const result = await generateTestDataDirect(token, createdForms, targetSpreadsheet, {
                     participants: numParticipants,
                     row: numRoW,
                     judges: numJudges
                 });
                 console.log('Test data result:', result);
-                alert(`✓ Test Data Generated!\n\nParticipants: ${numParticipants} responders\nRoW: ${numRoW} responders\nJudges: ${numJudges} responders\n\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
+                
+                const spreadsheetUrl = result.spreadsheetUrl || targetSpreadsheet.spreadsheetUrl;
+                alert(`✓ Test Data Generated!\n\nWritten to: ${spreadsheetUrl}\n\nParticipants: ${numParticipants} responders\nRoW: ${numRoW} responders\nJudges: ${numJudges} responders\n\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
 
                 testDataBtn.textContent = '🧪 Test Data Generated ✓';
-                window.open(result.spreadsheetUrl, '_blank');
+                window.open(spreadsheetUrl, '_blank');
             } catch (error) {
                 console.error('Error generating test data:', error);
-                alert(`Error: ${error.message}`);
+                console.error('createdForms.resultsSpreadsheet:', createdForms.resultsSpreadsheet);
+                alert(`Error: ${error.message}\n\nCheck browser console (F12) for details.`);
                 testDataBtn.disabled = false;
                 testDataBtn.textContent = '🧪 Generate Test Data';
             }
