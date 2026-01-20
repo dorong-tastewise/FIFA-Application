@@ -3689,6 +3689,37 @@ function initConfigWhenReady() {
 
 initConfigWhenReady();
 
+// ==================== URL ROUTING ====================
+// localhost/ or localhost → Auto-resume voting forms
+// localhost/draw or localhost/#draw → Show draw config screen (default)
+function handleRouting() {
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    
+    // Check if we should show draw config (explicit /draw path or #draw hash)
+    const isDrawRoute = path.includes('/draw') || hash.includes('#draw');
+    
+    if (!isDrawRoute) {
+        // Default route: Auto-click Resume Last Forms button after a short delay
+        console.log('Default route: Auto-resuming last voting forms...');
+        setTimeout(() => {
+            const resumeBtn = document.getElementById('resumeVotingMainBtn');
+            if (resumeBtn) {
+                resumeBtn.click();
+            }
+        }, 500);
+    } else {
+        console.log('Draw route: Showing draw configuration screen');
+    }
+}
+
+// Run routing after DOM is loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', handleRouting);
+} else {
+    handleRouting();
+}
+
 // ==================== EVENT LISTENERS ====================
 document.getElementById('drawBtn').addEventListener('click', drawEntry);
 document.getElementById('autoDrawBtn').addEventListener('click', autoDrawAll);

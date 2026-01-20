@@ -1180,12 +1180,19 @@ async function safeClearRange(accessToken, spreadsheetId, range) {
  * @param {string} method - 'PUT' or 'POST' (for append)
  */
 async function safeWriteRange(accessToken, spreadsheetId, range, values, method = 'PUT') {
-    if (!values || values.length === 0) return;
+    if (!values || values.length === 0) {
+        console.log(`>>> safeWriteRange: No data to write for ${range}`);
+        return false;
+    }
+    
+    console.log(`>>> safeWriteRange: Writing ${values.length} rows to ${range} (method: ${method})`);
     
     try {
         const url = method === 'POST' 
             ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`
             : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+        
+        console.log(`>>> URL: ${url}`);
         
         const response = await fetch(url, {
             method: method,
@@ -1195,10 +1202,16 @@ async function safeWriteRange(accessToken, spreadsheetId, range, values, method 
         
         if (!response.ok) {
             const error = await response.json();
-            console.warn(`Warning: Could not write to ${range}:`, error.error?.message || 'unknown error');
+            console.error(`ERROR writing to ${range}:`, error.error?.message || 'unknown error');
+            console.error('Full error:', error);
+            return false;
         }
+        
+        console.log(`>>> SUCCESS: Wrote to ${range}`);
+        return true;
     } catch (error) {
-        console.warn(`Warning: Error writing to ${range}:`, error.message);
+        console.error(`ERROR writing to ${range}:`, error.message);
+        return false;
     }
 }
 
@@ -2200,8 +2213,13 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     const weights = { impact: 0.4, readiness: 0.4, presentation: 0.2 };
     
     // Generate random responses for each form
+    console.log('>>> Forms available:', Object.keys(createdForms.forms || {}).length);
     for (const [formId, formData] of Object.entries(createdForms.forms || {})) {
-        if (!formData.votingOptions || formData.votingOptions.length === 0) continue;
+        console.log(`>>> Checking form: ${formId}, teamName: ${formData.teamName}, votingOptions: ${formData.votingOptions?.length || 0}`);
+        if (!formData.votingOptions || formData.votingOptions.length === 0) {
+            console.log(`>>> SKIPPING ${formId} - no votingOptions!`);
+            continue;
+        }
         
         const isJudges = formData.isJudgesForm || formData.teamName === 'Judges';
         const isRoW = formData.isRoWForm || formData.teamName === 'RoW';
