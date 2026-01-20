@@ -3111,7 +3111,7 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 console.log('=== AGGREGATING REAL RESPONSES FROM FORMS API ===');
                 const result = await aggregateFormResponses(token, createdForms, createdForms.resultsSpreadsheet);
                 console.log('Aggregation result:', result);
-                alert(`✓ Aggregated from Google Forms!\n\nParticipant votes: ${result.participantVotes || 0}\nRoW votes: ${result.rowVotes || 0}\nJudge votes: ${result.judgeVotes || 0}\nProjects: ${result.projects}`);
+                alert(`✓ Aggregated from Google Forms!\n\nParticipant votes: ${result.participantVotes || 0}\nRoW votes: ${result.rowVotes || 0}\nJudges votes: ${result.judgesVotes || 0}\nProjects: ${result.projects}`);
 
                 aggregateBtn.textContent = '📊 Aggregated ✓';
                 window.open(createdForms.resultsSpreadsheet.spreadsheetUrl, '_blank');
