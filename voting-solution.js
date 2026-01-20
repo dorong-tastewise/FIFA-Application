@@ -3071,6 +3071,9 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
         actionButtons = `
             <button id="aggregateResponsesBtn" style="padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
                 📊 Aggregate Responses
+            </button>
+            <button id="generateTestDataBtn" style="padding: 10px 20px; background: #9C27B0; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                🧪 Generate Test Data
             </button>`;
     }
     
@@ -3124,17 +3127,17 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 alert('Not authenticated. Please refresh and try again.');
                 return;
             }
-            
+
             aggregateBtn.disabled = true;
             aggregateBtn.textContent = '📊 Aggregating...';
-            
+
             try {
                 // ALWAYS use Forms API to get REAL responses (not the empty response spreadsheets)
                 console.log('=== AGGREGATING REAL RESPONSES FROM FORMS API ===');
                 const result = await aggregateFormResponses(token, createdForms, createdForms.resultsSpreadsheet);
                 console.log('Aggregation result:', result);
-                alert(`✓ Aggregated from Google Forms!\n\nParticipant votes: ${result.participantVotes || 0}\nJudge votes: ${result.judgeVotes || 0}\nProjects: ${result.projects}`);
-                
+                alert(`✓ Aggregated from Google Forms!\n\nParticipant votes: ${result.participantVotes || 0}\nRoW votes: ${result.rowVotes || 0}\nJudge votes: ${result.judgeVotes || 0}\nProjects: ${result.projects}`);
+
                 aggregateBtn.textContent = '📊 Aggregated ✓';
                 window.open(createdForms.resultsSpreadsheet.spreadsheetUrl, '_blank');
             } catch (error) {
@@ -3142,6 +3145,36 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 alert(`Error: ${error.message}`);
                 aggregateBtn.disabled = false;
                 aggregateBtn.textContent = '📊 Aggregate Real Responses';
+            }
+        });
+    }
+
+    // Add test data button listener (generates fake data directly into sheets)
+    const testDataBtn = document.getElementById('generateTestDataBtn');
+    if (testDataBtn && createdForms && createdForms.resultsSpreadsheet) {
+        testDataBtn.addEventListener('click', async () => {
+            const token = modal.dataset.accessToken || _votingAccessToken || sessionStorage.getItem('votingAccessToken');
+            if (!token) {
+                alert('Not authenticated. Please refresh and try again.');
+                return;
+            }
+
+            testDataBtn.disabled = true;
+            testDataBtn.textContent = '🧪 Generating...';
+
+            try {
+                console.log('=== GENERATING TEST DATA DIRECTLY INTO SHEETS ===');
+                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, 3);
+                console.log('Test data result:', result);
+                alert(`✓ Test Data Generated!\n\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
+
+                testDataBtn.textContent = '🧪 Test Data Generated ✓';
+                window.open(result.spreadsheetUrl, '_blank');
+            } catch (error) {
+                console.error('Error generating test data:', error);
+                alert(`Error: ${error.message}`);
+                testDataBtn.disabled = false;
+                testDataBtn.textContent = '🧪 Generate Test Data';
             }
         });
     }
