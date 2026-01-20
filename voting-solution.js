@@ -3763,6 +3763,195 @@ async function runSanityTests(accessToken, spreadsheetId) {
                 }
             }
             
+            // Test 12: Weighted Results columns add up (Total = Impact + Readiness + Presentation)
+            console.log('\n─── COLUMN SUM VERIFICATION ───');
+            
+            for (const sheet of ['Participants Weighted Results', 'RoW Weighted Results', 'Judges Weighted Results']) {
+                if (sheetData[sheet] && sheetData[sheet].length > 1) {
+                    let errors = 0;
+                    const rows = sheetData[sheet].slice(1);
+                    
+                    for (const row of rows) {
+                        const [project, impact, readiness, presentation, total] = row;
+                        const i = parseFloat(impact) || 0;
+                        const r = parseFloat(readiness) || 0;
+                        const p = parseFloat(presentation) || 0;
+                        const t = parseFloat(total) || 0;
+                        const expected = i + r + p;
+                        
+                        if (Math.abs(expected - t) > 0.01) {
+                            console.log(`  ⚠️ ${sheet} - ${project}: ${i} + ${r} + ${p} = ${expected.toFixed(2)}, got ${t}`);
+                            errors++;
+                        }
+                    }
+                    
+                    addResult(
+                        `Column sums: ${sheet}`,
+                        errors === 0,
+                        errors === 0 ? `All ${rows.length} rows: Total = Impact + Readiness + Presentation ✓` : `${errors}/${rows.length} rows have wrong totals`
+                    );
+                }
+            }
+            
+            // Test 13: Verify weighted results against raw votes (recalculate and compare)
+            console.log('\n─── WEIGHTED CALCULATION VERIFICATION ───');
+            
+            const verifyWeightedFromVotes = (votesSheet, weightedSheet, sheetName) => {
+                if (!sheetData[votesSheet] || sheetData[votesSheet].length < 2) return null;
+                if (!sheetData[weightedSheet] || sheetData[weightedSheet].length < 2) return null;
+                
+                // Recalculate weighted results from raw votes
+                const votes = sheetData[votesSheet].slice(1);
+                const recalcScores = {};
+                
+                for (const vote of votes) {
+                    const [timestamp, email, form, category, project, rank, points] = vote;
+                    const pts = parseFloat(points) || 0;
+                    
+                    if (!recalcScores[project]) {
+                        recalcScores[project] = { impact: [], readiness: [], presentation: [] };
+                    }
+                    
+                    if (category === 'Business Impact') recalcScores[project].impact.push(pts);
+                    else if (category === 'Production Readiness') recalcScores[project].readiness.push(pts);
+                    else if (category === 'Presentation') recalcScores[project].presentation.push(pts);
+                }
+                
+                // Compare with actual weighted results
+                const actualWeighted = sheetData[weightedSheet].slice(1);
+                let mismatches = 0;
+                
+                for (const row of actualWeighted) {
+                    const [project, impact, readiness, presentation, total] = row;
+                    const scores = recalcScores[project];
+                    
+                    if (!scores) {
+                        console.log(`  ⚠️ ${sheetName}: Project "${project}" not found in votes!`);
+                        mismatches++;
+                        continue;
+                    }
+                    
+                    // Recalculate expected values
+                    const avgI = scores.impact.length > 0 ? scores.impact.reduce((a,b) => a+b, 0) / scores.impact.length : 0;
+                    const avgR = scores.readiness.length > 0 ? scores.readiness.reduce((a,b) => a+b, 0) / scores.readiness.length : 0;
+                    const avgP = scores.presentation.length > 0 ? scores.presentation.reduce((a,b) => a+b, 0) / scores.presentation.length : 0;
+                    
+                    const expectedI = avgI * 0.4;
+                    const expectedR = avgR * 0.4;
+                    const expectedP = avgP * 0.2;
+                    const expectedT = expectedI + expectedR + expectedP;
+                    
+                    const actualI = parseFloat(impact) || 0;
+                    const actualR = parseFloat(readiness) || 0;
+                    const actualP = parseFloat(presentation) || 0;
+                    const actualT = parseFloat(total) || 0;
+                    
+                    const tol = 0.01;
+                    if (Math.abs(expectedI - actualI) > tol || 
+                        Math.abs(expectedR - actualR) > tol || 
+                        Math.abs(expectedP - actualP) > tol ||
+                        Math.abs(expectedT - actualT) > tol) {
+                        console.log(`  ⚠️ ${sheetName} - ${project}:`);
+                        console.log(`     Expected: I=${expectedI.toFixed(2)}, R=${expectedR.toFixed(2)}, P=${expectedP.toFixed(2)}, T=${expectedT.toFixed(2)}`);
+                        console.log(`     Actual:   I=${actualI.toFixed(2)}, R=${actualR.toFixed(2)}, P=${actualP.toFixed(2)}, T=${actualT.toFixed(2)}`);
+                        mismatches++;
+                    }
+                }
+                
+                return { total: actualWeighted.length, mismatches };
+            };
+            
+            const pVerify = verifyWeightedFromVotes('Participants Votes', 'Participants Weighted Results', 'Participants');
+            if (pVerify) {
+                addResult(
+                    'Recalc verification: Participants Weighted',
+                    pVerify.mismatches === 0,
+                    pVerify.mismatches === 0 ? `All ${pVerify.total} projects match recalculated values ✓` : `${pVerify.mismatches}/${pVerify.total} mismatches`
+                );
+            }
+            
+            const rVerify = verifyWeightedFromVotes('RoW Votes', 'RoW Weighted Results', 'RoW');
+            if (rVerify) {
+                addResult(
+                    'Recalc verification: RoW Weighted',
+                    rVerify.mismatches === 0,
+                    rVerify.mismatches === 0 ? `All ${rVerify.total} projects match recalculated values ✓` : `${rVerify.mismatches}/${rVerify.total} mismatches`
+                );
+            }
+            
+            const jVerify = verifyWeightedFromVotes('Judges Votes', 'Judges Weighted Results', 'Judges');
+            if (jVerify) {
+                addResult(
+                    'Recalc verification: Judges Weighted',
+                    jVerify.mismatches === 0,
+                    jVerify.mismatches === 0 ? `All ${jVerify.total} projects match recalculated values ✓` : `${jVerify.mismatches}/${jVerify.total} mismatches`
+                );
+            }
+            
+            // Test 14: Verify Final Weighted Results against group weighted results
+            console.log('\n─── FINAL SCORE VERIFICATION ───');
+            
+            if (sheetData['Final Weighted Results'] && sheetData['Final Weighted Results'].length > 1) {
+                const finalRows = sheetData['Final Weighted Results'].slice(1);
+                let finalErrors = 0;
+                
+                // Build lookup maps for weighted results
+                const pMap = {}, rMap = {}, jMap = {};
+                if (sheetData['Participants Weighted Results']) {
+                    sheetData['Participants Weighted Results'].slice(1).forEach(row => {
+                        pMap[row[0]] = parseFloat(row[4]) || 0; // Total column
+                    });
+                }
+                if (sheetData['RoW Weighted Results']) {
+                    sheetData['RoW Weighted Results'].slice(1).forEach(row => {
+                        rMap[row[0]] = parseFloat(row[4]) || 0;
+                    });
+                }
+                if (sheetData['Judges Weighted Results']) {
+                    sheetData['Judges Weighted Results'].slice(1).forEach(row => {
+                        jMap[row[0]] = parseFloat(row[4]) || 0;
+                    });
+                }
+                
+                for (const row of finalRows) {
+                    const [project, pContrib, rContrib, jContrib, finalScore] = row;
+                    
+                    // Get source totals
+                    const pTotal = pMap[project] || 0;
+                    const rTotal = rMap[project] || 0;
+                    const jTotal = jMap[project] || 0;
+                    
+                    // Expected contributions (with scaling for R and J)
+                    const expectedP = pTotal * 0.4;
+                    const expectedR = (rTotal * 0.8) * 0.2; // scaled then weighted
+                    const expectedJ = (jTotal * 0.8) * 0.4; // scaled then weighted
+                    const expectedFinal = expectedP + expectedR + expectedJ;
+                    
+                    const actualP = parseFloat(pContrib) || 0;
+                    const actualR = parseFloat(rContrib) || 0;
+                    const actualJ = parseFloat(jContrib) || 0;
+                    const actualFinal = parseFloat(finalScore) || 0;
+                    
+                    const tol = 0.01;
+                    if (Math.abs(expectedP - actualP) > tol || 
+                        Math.abs(expectedR - actualR) > tol || 
+                        Math.abs(expectedJ - actualJ) > tol ||
+                        Math.abs(expectedFinal - actualFinal) > tol) {
+                        console.log(`  ⚠️ Final - ${project}:`);
+                        console.log(`     Source totals: P=${pTotal.toFixed(2)}, R=${rTotal.toFixed(2)}, J=${jTotal.toFixed(2)}`);
+                        console.log(`     Expected: P*0.4=${expectedP.toFixed(2)}, R*0.8*0.2=${expectedR.toFixed(2)}, J*0.8*0.4=${expectedJ.toFixed(2)}, Final=${expectedFinal.toFixed(2)}`);
+                        console.log(`     Actual:   P=${actualP.toFixed(2)}, R=${actualR.toFixed(2)}, J=${actualJ.toFixed(2)}, Final=${actualFinal.toFixed(2)}`);
+                        finalErrors++;
+                    }
+                }
+                
+                addResult(
+                    'Final scores match weighted sources (with 0.8 scaling)',
+                    finalErrors === 0,
+                    finalErrors === 0 ? `All ${finalRows.length} final scores correctly derived from weighted results ✓` : `${finalErrors}/${finalRows.length} mismatches`
+                );
+            }
+            
         } catch (e) {
             addResult('Integration tests', false, `Error: ${e.message}`);
         }
