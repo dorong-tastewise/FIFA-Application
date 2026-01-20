@@ -2300,7 +2300,23 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     console.log(`>>> Ensuring sheets exist: ${requiredSheets.join(', ')}`);
     await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
     
-    // Write headers to all sheets (in case they don't exist or are outdated)
+    // CLEAR ALL EXISTING DATA FIRST (start from scratch)
+    console.log(`>>> Clearing all existing data...`);
+    const sheetsToClear = [
+        'Participants Votes!A:Z',
+        'RoW Votes!A:Z',
+        'Judges Votes!A:Z',
+        'Participants Weighted Results!A:Z',
+        'RoW Weighted Results!A:Z',
+        'Judges Weighted Results!A:Z',
+        'Final Weighted Results!A:Z'
+    ];
+    for (const range of sheetsToClear) {
+        await safeClearRange(accessToken, spreadsheetId, range);
+    }
+    console.log(`>>> All sheets cleared`);
+    
+    // Write headers to all sheets
     const votesHeaders = [['Timestamp', 'Email', 'Form', 'Category', 'Project', 'Rank', 'Points']];
     const weightedHeaders = [['Project', 'Business Impact (40%)', 'Production Readiness (40%)', 'Presentation (20%)', 'Total Score']];
     const finalHeaders = [['Project', 'Participants (40%)', 'RoW (20%, scaled 0.8)', 'Judges (40%, scaled 0.8)', 'Final Score']];
@@ -2737,13 +2753,20 @@ function addVotingButtonToUI() {
                         };
                     } else if (file.mimeType === 'application/vnd.google-apps.form') {
                         // All forms in this folder are voting forms - use the filename as team name
+                        const formName = file.name;
+                        const isJudges = formName.toLowerCase().includes('judge');
+                        const isRoW = formName.toLowerCase().includes('row');
+                        
                         createdForms.forms[file.id] = {
                             formId: file.id,
-                            teamName: file.name,
+                            teamName: formName,
                             status: 'created',
                             responderUri: `https://docs.google.com/forms/d/${file.id}/viewform`,
-                            editUri: `https://docs.google.com/forms/d/${file.id}/edit`
+                            editUri: `https://docs.google.com/forms/d/${file.id}/edit`,
+                            isJudgesForm: isJudges,
+                            isRoWForm: isRoW
                         };
+                        console.log(`Form: ${formName}, isJudges: ${isJudges}, isRoW: ${isRoW}`);
                     }
                 }
                 
@@ -3406,13 +3429,20 @@ document.addEventListener('DOMContentLoaded', function() {
                         };
                     } else if (file.mimeType === 'application/vnd.google-apps.form') {
                         // All forms in this folder are voting forms - use the filename as team name
+                        const formName = file.name;
+                        const isJudges = formName.toLowerCase().includes('judge');
+                        const isRoW = formName.toLowerCase().includes('row');
+                        
                         createdForms.forms[file.id] = {
                             formId: file.id,
-                            teamName: file.name,
+                            teamName: formName,
                             status: 'created',
                             responderUri: `https://docs.google.com/forms/d/${file.id}/viewform`,
-                            editUri: `https://docs.google.com/forms/d/${file.id}/edit`
+                            editUri: `https://docs.google.com/forms/d/${file.id}/edit`,
+                            isJudgesForm: isJudges,
+                            isRoWForm: isRoW
                         };
+                        console.log(`[Resume] Form: ${formName}, isJudges: ${isJudges}, isRoW: ${isRoW}`);
                     }
                 }
                 
