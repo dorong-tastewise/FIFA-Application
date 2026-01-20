@@ -1277,10 +1277,10 @@ function calculateFinalResults(participantWeighted, rowWeighted, judgesWeighted)
         
         finalResults.push([
             project,
-            pContrib.toFixed(2),
-            rContrib.toFixed(2),
-            jContrib.toFixed(2),
-            finalScore.toFixed(2)
+            Math.round(pContrib * 100) / 100,
+            Math.round(rContrib * 100) / 100,
+            Math.round(jContrib * 100) / 100,
+            Math.round(finalScore * 100) / 100
         ]);
     }
     
@@ -1369,9 +1369,13 @@ async function processAndWriteResults(accessToken, spreadsheetId, data) {
     const rowWeighted = calculateWeightedResults(rowScores);
     const judgesWeighted = calculateWeightedResults(judgesScores);
     
-    // 6. Write weighted results
+    // 6. Write weighted results (keep as numbers, round to 2 decimals)
     const formatWeighted = (results) => results.map(r => [
-        r.project, r.impact.toFixed(2), r.readiness.toFixed(2), r.presentation.toFixed(2), r.total.toFixed(2)
+        r.project,
+        Math.round(r.impact * 100) / 100,
+        Math.round(r.readiness * 100) / 100,
+        Math.round(r.presentation * 100) / 100,
+        Math.round(r.total * 100) / 100
     ]);
     
     if (participantWeighted.length > 0) {
