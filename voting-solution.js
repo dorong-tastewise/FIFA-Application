@@ -2169,9 +2169,27 @@ async function generateTestData(accessToken, createdForms, resultsSpreadsheet, r
 }
 
 // Keep the old direct method as backup
-async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsheet, responsesPerForm = 3) {
+async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsheet, responsesConfig = 5) {
     console.log('=== GENERATING TEST DATA (Direct) ===');
-    
+
+    // Handle both old single number and new object config
+    let responderCounts;
+    if (typeof responsesConfig === 'object') {
+        responderCounts = {
+            participants: responsesConfig.participants || 5,
+            row: responsesConfig.row || 5,
+            judges: responsesConfig.judges || 5
+        };
+    } else {
+        // Legacy: single number for all
+        responderCounts = {
+            participants: responsesConfig,
+            row: responsesConfig,
+            judges: responsesConfig
+        };
+    }
+    console.log('Responder counts:', responderCounts);
+
     const participantVotes = [];
     const rowVotes = [];
     const judgesVotes = [];
@@ -2192,7 +2210,8 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         const targetVotes = isJudges ? judgesVotes : isRoW ? rowVotes : participantVotes;
         const targetScores = isJudges ? judgesScores : isRoW ? rowScores : participantScores;
         
-        const numResponses = responsesPerForm; // Same number for all forms
+        // Use specific count for each form type
+        const numResponses = isJudges ? responderCounts.judges : isRoW ? responderCounts.row : responderCounts.participants;
         const typeLabel = isJudges ? 'JUDGES' : isRoW ? 'ROW' : 'participant';
         console.log(`Generating ${numResponses} test responses for: ${formData.teamName} (${typeLabel})`);
         
@@ -3072,13 +3091,24 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
             <button id="aggregateResponsesBtn" style="padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
                 📊 Aggregate Responses
             </button>
-            <div style="display: inline-flex; align-items: center; margin-right: 10px; background: #f5f5f5; padding: 5px 10px; border-radius: 5px;">
-                <label for="testDataResponders" style="margin-right: 8px; font-size: 14px;">Responders:</label>
-                <input type="number" id="testDataResponders" value="5" min="1" max="20" style="width: 50px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; text-align: center;">
-            </div>
-            <button id="generateTestDataBtn" style="padding: 10px 20px; background: #9C27B0; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
-                🧪 Generate Test Data
-            </button>`;
+            <div style="display: flex; align-items: center; gap: 15px; margin: 15px 0; background: #f5f5f5; padding: 10px 15px; border-radius: 5px; flex-wrap: wrap;">
+                <span style="font-weight: bold; font-size: 14px;">Test Responders:</span>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="testParticipants" style="font-size: 13px;">Participants:</label>
+                    <input type="number" id="testParticipants" value="5" min="0" max="50" style="width: 45px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: center;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="testRoW" style="font-size: 13px;">RoW:</label>
+                    <input type="number" id="testRoW" value="5" min="0" max="50" style="width: 45px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: center;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="testJudges" style="font-size: 13px;">Judges:</label>
+                    <input type="number" id="testJudges" value="5" min="0" max="50" style="width: 45px; padding: 4px; border: 1px solid #ccc; border-radius: 3px; text-align: center;">
+                </div>
+                <button id="generateTestDataBtn" style="padding: 8px 16px; background: #9C27B0; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    🧪 Generate Test Data
+                </button>
+            </div>`;
     }
     
     content.innerHTML = `
@@ -3163,18 +3193,23 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 return;
             }
 
-            // Get the number of responders from the input field
-            const respondersInput = document.getElementById('testDataResponders');
-            const numResponders = parseInt(respondersInput?.value) || 5;
+            // Get the number of responders for each form type
+            const numParticipants = parseInt(document.getElementById('testParticipants')?.value) || 5;
+            const numRoW = parseInt(document.getElementById('testRoW')?.value) || 5;
+            const numJudges = parseInt(document.getElementById('testJudges')?.value) || 5;
 
             testDataBtn.disabled = true;
             testDataBtn.textContent = '🧪 Generating...';
 
             try {
-                console.log(`=== GENERATING TEST DATA (${numResponders} responders per form) ===`);
-                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, numResponders);
+                console.log(`=== GENERATING TEST DATA (Participants: ${numParticipants}, RoW: ${numRoW}, Judges: ${numJudges}) ===`);
+                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, {
+                    participants: numParticipants,
+                    row: numRoW,
+                    judges: numJudges
+                });
                 console.log('Test data result:', result);
-                alert(`✓ Test Data Generated!\n\nResponders per form: ${numResponders}\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
+                alert(`✓ Test Data Generated!\n\nParticipants: ${numParticipants} responders\nRoW: ${numRoW} responders\nJudges: ${numJudges} responders\n\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
 
                 testDataBtn.textContent = '🧪 Test Data Generated ✓';
                 window.open(result.spreadsheetUrl, '_blank');
