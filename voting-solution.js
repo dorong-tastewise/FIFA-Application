@@ -2300,6 +2300,20 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
     console.log(`>>> Ensuring sheets exist: ${requiredSheets.join(', ')}`);
     await ensureSheetsExist(accessToken, spreadsheetId, requiredSheets);
     
+    // Write headers to all sheets (in case they don't exist or are outdated)
+    const votesHeaders = [['Timestamp', 'Email', 'Form', 'Category', 'Project', 'Rank', 'Points']];
+    const weightedHeaders = [['Project', 'Business Impact (40%)', 'Production Readiness (40%)', 'Presentation (20%)', 'Total Score']];
+    const finalHeaders = [['Project', 'Participants (40%)', 'RoW (20%, scaled 0.8)', 'Judges (40%, scaled 0.8)', 'Final Score']];
+    
+    console.log(`>>> Writing headers to all sheets...`);
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Votes!A1:G1', votesHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Votes!A1:G1', votesHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Votes!A1:G1', votesHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'Participants Weighted Results!A1:E1', weightedHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'RoW Weighted Results!A1:E1', weightedHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'Judges Weighted Results!A1:E1', weightedHeaders, 'PUT');
+    await safeWriteRange(accessToken, spreadsheetId, 'Final Weighted Results!A1:E1', finalHeaders, 'PUT');
+    
     // Write votes (using safe write that handles missing sheets)
     await safeWriteRange(accessToken, spreadsheetId, 'Participants Votes!A2:G', participantVotes, 'POST');
     if (participantVotes.length > 0) console.log(`✓ Wrote ${participantVotes.length} participant votes`);
