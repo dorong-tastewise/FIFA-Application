@@ -2192,7 +2192,7 @@ async function generateTestDataDirect(accessToken, createdForms, resultsSpreadsh
         const targetVotes = isJudges ? judgesVotes : isRoW ? rowVotes : participantVotes;
         const targetScores = isJudges ? judgesScores : isRoW ? rowScores : participantScores;
         
-        const numResponses = (isJudges || isRoW) ? 5 : responsesPerForm; // More judge/RoW responses
+        const numResponses = responsesPerForm; // Same number for all forms
         const typeLabel = isJudges ? 'JUDGES' : isRoW ? 'ROW' : 'participant';
         console.log(`Generating ${numResponses} test responses for: ${formData.teamName} (${typeLabel})`);
         
@@ -3072,6 +3072,10 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
             <button id="aggregateResponsesBtn" style="padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
                 📊 Aggregate Responses
             </button>
+            <div style="display: inline-flex; align-items: center; margin-right: 10px; background: #f5f5f5; padding: 5px 10px; border-radius: 5px;">
+                <label for="testDataResponders" style="margin-right: 8px; font-size: 14px;">Responders:</label>
+                <input type="number" id="testDataResponders" value="5" min="1" max="20" style="width: 50px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; text-align: center;">
+            </div>
             <button id="generateTestDataBtn" style="padding: 10px 20px; background: #9C27B0; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
                 🧪 Generate Test Data
             </button>`;
@@ -3159,14 +3163,18 @@ function showVotingFormsModal(votingData, createdForms = null, message = null, i
                 return;
             }
 
+            // Get the number of responders from the input field
+            const respondersInput = document.getElementById('testDataResponders');
+            const numResponders = parseInt(respondersInput?.value) || 5;
+
             testDataBtn.disabled = true;
             testDataBtn.textContent = '🧪 Generating...';
 
             try {
-                console.log('=== GENERATING TEST DATA DIRECTLY INTO SHEETS ===');
-                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, 3);
+                console.log(`=== GENERATING TEST DATA (${numResponders} responders per form) ===`);
+                const result = await generateTestDataDirect(token, createdForms, createdForms.resultsSpreadsheet, numResponders);
                 console.log('Test data result:', result);
-                alert(`✓ Test Data Generated!\n\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
+                alert(`✓ Test Data Generated!\n\nResponders per form: ${numResponders}\nTotal votes: ${result.rawVotes}\nProjects: ${result.projects}\n\nOpening results spreadsheet...`);
 
                 testDataBtn.textContent = '🧪 Test Data Generated ✓';
                 window.open(result.spreadsheetUrl, '_blank');
