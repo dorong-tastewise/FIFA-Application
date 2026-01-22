@@ -1730,24 +1730,32 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         judgesScores: {}
     };
     
+    // Log all unique form names for debugging
+    const uniqueForms = [...new Set(allResponses.map(r => r.form))];
+    console.log('All form names in responses:', uniqueForms);
+    
     for (const r of allResponses) {
-        const isJudge = r.form === 'Judges Voting' || r.form.toLowerCase().includes('judge');
-        const isRoW = r.form === 'RoW Voting' || r.form.toLowerCase().includes('row');
+        const formLower = r.form.toLowerCase();
+        const isJudge = r.form === 'Judges Voting' || formLower.includes('judge');
+        const isRoW = r.form === 'RoW Voting' || formLower.includes('row');
         
         // Convert to array format for votes
         const voteRow = [r.timestamp, r.email, r.form, r.category, r.project, r.rank, r.points];
         
         // Determine which group this response belongs to
-        let targetVotes, targetScores;
+        let targetVotes, targetScores, groupName;
         if (isJudge) {
             targetVotes = collectedData.judgesVotes;
             targetScores = collectedData.judgesScores;
+            groupName = 'JUDGES';
         } else if (isRoW) {
             targetVotes = collectedData.rowVotes;
             targetScores = collectedData.rowScores;
+            groupName = 'ROW';
         } else {
             targetVotes = collectedData.participantVotes;
             targetScores = collectedData.participantScores;
+            groupName = 'PARTICIPANTS';
         }
         
         targetVotes.push(voteRow);
@@ -1761,7 +1769,23 @@ async function aggregateFormResponses(accessToken, createdForms, resultsSpreadsh
         else if (r.category === 'Presentation') targetScores[r.project].presentation.push(r.points);
     }
     
-    console.log(`Participant responses: ${collectedData.participantVotes.length}, RoW responses: ${collectedData.rowVotes.length}, Judge responses: ${collectedData.judgesVotes.length}`);
+    // Summary of classification
+    console.log('=== RESPONSE CLASSIFICATION SUMMARY ===');
+    console.log(`Total responses: ${allResponses.length}`);
+    console.log(`  → Participants: ${collectedData.participantVotes.length} votes`);
+    console.log(`  → RoW: ${collectedData.rowVotes.length} votes`);
+    console.log(`  → Judges: ${collectedData.judgesVotes.length} votes`);
+    
+    // Show which forms contributed to which group
+    const formToGroup = {};
+    for (const r of allResponses) {
+        const formLower = r.form.toLowerCase();
+        const isJudge = r.form === 'Judges Voting' || formLower.includes('judge');
+        const isRoW = r.form === 'RoW Voting' || formLower.includes('row');
+        const group = isJudge ? 'JUDGES' : isRoW ? 'ROW' : 'PARTICIPANTS';
+        formToGroup[r.form] = group;
+    }
+    console.log('Form → Group mapping:', formToGroup);
     
     // Use shared function to process and write all results
     const result = await processAndWriteResults(accessToken, resultsSpreadsheet.spreadsheetId, collectedData);
